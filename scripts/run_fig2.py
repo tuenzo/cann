@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 
 from src.experiments.single_layer_exp import (
     SingleLayerExperimentConfig,
+    TrialTimeline,
     run_single_layer_experiment,
     run_experiment_with_recording,
 )
@@ -41,8 +42,10 @@ def main():
     parser = argparse.ArgumentParser(description='Reproduce Figure 2')
     parser.add_argument('--output_dir', type=str, default='results/fig2',
                         help='Output directory for figures')
-    parser.add_argument('--n_trials', type=int, default=20,
-                        help='Number of trials per condition')
+    parser.add_argument('--n_runs', type=int, default=20,
+                        help='Number of simulation runs')
+    parser.add_argument('--n_trials_per_run', type=int, default=100,
+                        help='Number of trials per run')
     parser.add_argument('--isi', type=float, default=1000.0,
                         help='Inter-stimulus interval (ms)')
     args = parser.parse_args()
@@ -57,9 +60,11 @@ def main():
     print("=" * 60)
     
     # Configuration
+    timeline = TrialTimeline(isi=args.isi)
     config = SingleLayerExperimentConfig(
-        n_trials=args.n_trials,
-        isi=args.isi,
+        n_runs=args.n_runs,
+        n_trials_per_run=args.n_trials_per_run,
+        timeline=timeline,
     )
     
     # ========== STD-dominated Experiment (Fig 2A-C) ==========
@@ -67,14 +72,22 @@ def main():
     std_results = run_single_layer_experiment(config, stp_type='std', verbose=True)
     
     print("\n[2/4] Recording STD neural activity...")
-    std_recording = run_experiment_with_recording(config, stp_type='std', delta_to_record=30.0)
+    std_recording = run_experiment_with_recording(
+        config=config, 
+        stp_type='std', 
+        delta_to_record=-30.0  # θ_s1=-30°, θ_s2=0° per paper
+    )
     
     # ========== STF-dominated Experiment (Fig 2D-F) ==========
     print("\n[3/4] Running STF-dominated experiment (attraction)...")
     stf_results = run_single_layer_experiment(config, stp_type='stf', verbose=True)
     
     print("\n[4/4] Recording STF neural activity...")
-    stf_recording = run_experiment_with_recording(config, stp_type='stf', delta_to_record=30.0)
+    stf_recording = run_experiment_with_recording(
+        config=config, 
+        stp_type='stf', 
+        delta_to_record=-30.0  # θ_s1=-30°, θ_s2=0° per paper
+    )
     
     # ========== Analysis ==========
     print("\n" + "=" * 60)
@@ -82,7 +95,9 @@ def main():
     print("=" * 60)
     
     # STD results
-    std_bias = compute_serial_bias(std_results['delta'], std_results['errors'])
+    std_delta = std_results['trials_df']['delta']
+    std_errors = std_results['trials_df']['error']
+    std_bias = compute_serial_bias(std_delta, std_errors)
     print(f"\nSTD-dominated (Fig 2A-C):")
     print(f"  Effect type: {std_bias['effect_type']}")
     print(f"  DoG amplitude: {std_bias['dog_params'].amplitude:.2f}°")
@@ -90,7 +105,9 @@ def main():
     print(f"  R²: {std_bias['dog_params'].r_squared:.3f}")
     
     # STF results
-    stf_bias = compute_serial_bias(stf_results['delta'], stf_results['errors'])
+    stf_delta = stf_results['trials_df']['delta']
+    stf_errors = stf_results['trials_df']['error']
+    stf_bias = compute_serial_bias(stf_delta, stf_errors)
     print(f"\nSTF-dominated (Fig 2D-F):")
     print(f"  Effect type: {stf_bias['effect_type']}")
     print(f"  DoG amplitude: {stf_bias['dog_params'].amplitude:.2f}°")
@@ -104,25 +121,25 @@ def main():
     
     # Combine data for plotting
     std_plot_data = {
-        'time': std_recording['time'],
-        'activity': std_recording['activity'],
-        'stp_x': std_recording['stp_x'],
-        'stp_u': std_recording['stp_u'],
+        'time': std_recording['timeseries']['time'],
+        'activity': std_recording['timeseries']['r'],
+        'stp_x': std_recording['timeseries']['stp_x'],
+        'stp_u': std_recording['timeseries']['stp_u'],
         'theta': std_recording['theta'],
-        'stim_neuron': std_recording['stim_neuron'],
-        'delta': std_results['delta'],
-        'errors': std_results['errors'],
+        'stim_neuron': std_recording['s1_neuron'],
+        'delta': std_results['curve_binned']['delta'],
+        'errors': std_results['curve_binned']['mean_error'],
     }
     
     stf_plot_data = {
-        'time': stf_recording['time'],
-        'activity': stf_recording['activity'],
-        'stp_x': stf_recording['stp_x'],
-        'stp_u': stf_recording['stp_u'],
+        'time': stf_recording['timeseries']['time'],
+        'activity': stf_recording['timeseries']['r'],
+        'stp_x': stf_recording['timeseries']['stp_x'],
+        'stp_u': stf_recording['timeseries']['stp_u'],
         'theta': stf_recording['theta'],
-        'stim_neuron': stf_recording['stim_neuron'],
-        'delta': stf_results['delta'],
-        'errors': stf_results['errors'],
+        'stim_neuron': stf_recording['s1_neuron'],
+        'delta': stf_results['curve_binned']['delta'],
+        'errors': stf_results['curve_binned']['mean_error'],
     }
     
     # Main figure
@@ -136,7 +153,7 @@ def main():
     # STD neural activity
     fig_a, ax_a = plt.subplots(figsize=(8, 4))
     plot_neural_activity(
-        std_recording['time'], std_recording['activity'],
+        std_recording['timeseries']['time'], std_recording['timeseries']['r'],
         std_recording['theta'], ax=ax_a, title='Fig 2A: STD Neural Activity'
     )
     fig_a.savefig(output_dir / 'fig2a_std_activity.png', bbox_inches='tight')
@@ -146,8 +163,10 @@ def main():
     # STD STP dynamics
     fig_b, ax_b = plt.subplots(figsize=(8, 3))
     plot_stp_dynamics(
-        std_recording['time'], std_recording['stp_x'], std_recording['stp_u'],
-        std_recording['stim_neuron'], ax=ax_b, title='Fig 2B: STD Dynamics'
+        std_recording['timeseries']['time'], 
+        std_recording['timeseries']['stp_x'], 
+        std_recording['timeseries']['stp_u'],
+        std_recording['s1_neuron'], ax=ax_b, title='Fig 2B: STD Dynamics'
     )
     fig_b.savefig(output_dir / 'fig2b_std_stp.png', bbox_inches='tight')
     print(f"  Saved: {output_dir / 'fig2b_std_stp.png'}")
@@ -156,7 +175,8 @@ def main():
     # STD adjustment error
     fig_c, ax_c = plt.subplots(figsize=(6, 4))
     plot_adjustment_error(
-        std_results['delta'], std_results['errors'],
+        std_results['curve_binned']['delta'], 
+        std_results['curve_binned']['mean_error'],
         ax=ax_c, title='Fig 2C: STD Adjustment Error', color='#E74C3C'
     )
     fig_c.savefig(output_dir / 'fig2c_std_error.png', bbox_inches='tight')
@@ -166,7 +186,7 @@ def main():
     # STF panels
     fig_d, ax_d = plt.subplots(figsize=(8, 4))
     plot_neural_activity(
-        stf_recording['time'], stf_recording['activity'],
+        stf_recording['timeseries']['time'], stf_recording['timeseries']['r'],
         stf_recording['theta'], ax=ax_d, title='Fig 2D: STF Neural Activity'
     )
     fig_d.savefig(output_dir / 'fig2d_stf_activity.png', bbox_inches='tight')
@@ -175,8 +195,10 @@ def main():
     
     fig_e, ax_e = plt.subplots(figsize=(8, 3))
     plot_stp_dynamics(
-        stf_recording['time'], stf_recording['stp_x'], stf_recording['stp_u'],
-        stf_recording['stim_neuron'], ax=ax_e, title='Fig 2E: STF Dynamics'
+        stf_recording['timeseries']['time'], 
+        stf_recording['timeseries']['stp_x'], 
+        stf_recording['timeseries']['stp_u'],
+        stf_recording['s1_neuron'], ax=ax_e, title='Fig 2E: STF Dynamics'
     )
     fig_e.savefig(output_dir / 'fig2e_stf_stp.png', bbox_inches='tight')
     print(f"  Saved: {output_dir / 'fig2e_stf_stp.png'}")
@@ -184,7 +206,8 @@ def main():
     
     fig_f, ax_f = plt.subplots(figsize=(6, 4))
     plot_adjustment_error(
-        stf_results['delta'], stf_results['errors'],
+        stf_results['curve_binned']['delta'], 
+        stf_results['curve_binned']['mean_error'],
         ax=ax_f, title='Fig 2F: STF Adjustment Error', color='#3498DB'
     )
     fig_f.savefig(output_dir / 'fig2f_stf_error.png', bbox_inches='tight')
@@ -194,10 +217,12 @@ def main():
     # Save numerical results
     np.savez(
         output_dir / 'fig2_data.npz',
-        std_delta=std_results['delta'],
-        std_errors=std_results['errors'],
-        stf_delta=stf_results['delta'],
-        stf_errors=stf_results['errors'],
+        std_delta=std_results['curve_binned']['delta'],
+        std_errors=std_results['curve_binned']['mean_error'],
+        std_errors_se=std_results['curve_binned']['se_error'],
+        stf_delta=stf_results['curve_binned']['delta'],
+        stf_errors=stf_results['curve_binned']['mean_error'],
+        stf_errors_se=stf_results['curve_binned']['se_error'],
     )
     print(f"  Saved: {output_dir / 'fig2_data.npz'}")
     

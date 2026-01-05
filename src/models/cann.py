@@ -26,10 +26,10 @@ class CANNParams(NamedTuple):
     """Parameters for single-layer CANN.
     
     Attributes:
-        N: Number of neurons
+        N: Number of neurons (default 100 per Table 1)
         J0: Recurrent connection strength
         a: Gaussian tuning width (degrees)
-        tau: Membrane time constant (ms)
+        tau: Membrane time constant (ms), 10ms = 0.01s per Table 1
         k: Divisive normalization strength
         rho: Neural density
         A: Stimulus amplitude
@@ -38,19 +38,21 @@ class CANNParams(NamedTuple):
         tau_d: STD time constant (s)
         tau_f: STF time constant (s)
         U: Baseline release probability
+        theta_range: Orientation range, 'centered' for (-90,90), 'positive' for (0,180)
     """
-    N: int = 180
-    J0: float = 0.5
-    a: float = 30.0
-    tau: float = 1.0
-    k: float = 0.5
+    N: int = 100                  # Changed from 180 to 100 per Table 1
+    J0: float = 0.13              # Changed per Table 1 (STD default)
+    a: float = 28.6               # 0.5 radians ≈ 28.6 degrees
+    tau: float = 10.0             # Changed from 1.0 to 10.0 ms (0.01s per Table 1)
+    k: float = 0.0018             # Changed per Table 1 (STD default)
     rho: float = 1.0
-    A: float = 1.0
-    stim_width: float = 30.0
+    A: float = 20.0               # Changed per Table 1 (alpha_sti)
+    stim_width: float = 17.2      # 0.3 radians ≈ 17.2 degrees
     dt: float = 0.1
     tau_d: float = 3.0
     tau_f: float = 0.3
-    U: float = 0.3
+    U: float = 0.5                # Changed per Table 1 (STD default)
+    theta_range: str = 'centered' # 'centered' = (-90,90), 'positive' = (0,180)
 
 
 class CANNState(NamedTuple):
@@ -66,24 +68,35 @@ class CANNState(NamedTuple):
     stp: STPState     # STP状态
 
 
-def create_gaussian_kernel(N: int, a: float, J0: float) -> jnp.ndarray:
+def create_gaussian_kernel(
+    N: int, 
+    a: float, 
+    J0: float,
+    theta_range: str = 'centered',
+) -> jnp.ndarray:
     """Create Gaussian recurrent connectivity kernel.
     
     J(x,x') = J₀/(√(2π)a) exp(-(x-x')²/(2a²))
     
     Args:
-        N: Number of neurons (covering 180°)
+        N: Number of neurons
         a: Tuning width in degrees
         J0: Connection strength
+        theta_range: 'centered' for (-90,90), 'positive' for (0,180)
         
     Returns:
         Kernel array of shape (N,) for circular convolution
     """
-    # Neural positions in degrees (0 to 180)
-    theta = jnp.linspace(0, 180, N, endpoint=False)
+    # Neural positions based on theta_range
+    if theta_range == 'centered':
+        theta = jnp.linspace(-90, 90, N, endpoint=False)
+        center = 0.0
+    else:  # 'positive'
+        theta = jnp.linspace(0, 180, N, endpoint=False)
+        center = 90.0
     
     # Distance from center, accounting for circular topology
-    dx = theta - 90  # Center at 90 degrees
+    dx = theta - center
     
     # Gaussian kernel
     kernel = J0 / (jnp.sqrt(2 * jnp.pi) * a) * jnp.exp(-dx**2 / (2 * a**2))
@@ -99,23 +112,29 @@ def create_stimulus(
     N: int,
     A: float = 1.0,
     width: float = 30.0,
+    theta_range: str = 'centered',
 ) -> jnp.ndarray:
     """Create Gaussian stimulus input at given orientation.
     
     I_ext(x) = A * exp(-(x - θ_stim)² / (2 * width²))
     
     Args:
-        theta_stim: Stimulus orientation in degrees (0-180)
+        theta_stim: Stimulus orientation in degrees
         N: Number of neurons
         A: Stimulus amplitude
         width: Stimulus width in degrees
+        theta_range: 'centered' for (-90,90), 'positive' for (0,180)
         
     Returns:
         External input array of shape (N,)
     """
-    theta = jnp.linspace(0, 180, N, endpoint=False)
+    # Neural positions based on theta_range
+    if theta_range == 'centered':
+        theta = jnp.linspace(-90, 90, N, endpoint=False)
+    else:  # 'positive'
+        theta = jnp.linspace(0, 180, N, endpoint=False)
     
-    # Circular distance (handle wrap-around at 0/180)
+    # Circular distance (handle wrap-around)
     dx = theta - theta_stim
     # Map to [-90, 90] range for proper circular distance
     dx = jnp.where(dx > 90, dx - 180, dx)
@@ -240,9 +259,13 @@ class SingleLayerCANN:
         """
         self.params = params or CANNParams()
         self.kernel = create_gaussian_kernel(
-            self.params.N, self.params.a, self.params.J0
+            self.params.N, self.params.a, self.params.J0, self.params.theta_range
         )
-        self.theta = jnp.linspace(0, 180, self.params.N, endpoint=False)
+        # Set theta based on theta_range parameter
+        if self.params.theta_range == 'centered':
+            self.theta = jnp.linspace(-90, 90, self.params.N, endpoint=False)
+        else:  # 'positive'
+            self.theta = jnp.linspace(0, 180, self.params.N, endpoint=False)
         self.reset()
         
         # JIT compile the step function
@@ -306,7 +329,8 @@ class SingleLayerCANN:
             If record=True, returns dict with time course data
         """
         I_ext = create_stimulus(
-            theta_stim, self.params.N, self.params.A, self.params.stim_width
+            theta_stim, self.params.N, self.params.A, self.params.stim_width,
+            self.params.theta_range
         )
         
         n_steps = int(duration / self.params.dt)
