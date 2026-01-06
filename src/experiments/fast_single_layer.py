@@ -275,12 +275,12 @@ def run_fast_experiment(
     if stp_type == 'std':
         params = CANNParamsNumeric(
             N=100, J0=0.13, a=0.5, tau=10.0, k=0.0018, rho=1.0, dt=0.1,
-            tau_d=280.0, tau_f=20.0, U=0.45,
+            tau_d=3.0, tau_f=0.3, U=0.5,
         )
     else:  # stf
         params = CANNParamsNumeric(
             N=100, J0=0.06, a=0.4, tau=10.0, k=0.005, rho=1.0, dt=0.1,
-            tau_d=20.0, tau_f=620.0, U=0.08,
+            tau_d=0.3, tau_f=5.0, U=0.2,
         )
     
     trial_config = TrialConfig(
@@ -465,15 +465,14 @@ def run_trial_with_recording(
         all_stp_x.append(np.array(state.stp.x))
         all_stp_u.append(np.array(state.stp.u))
     
-    # Phase 2: ISI (sparse recording)
+    # Phase 2: ISI
     for i in range(n_isi):
         state = cann_step_fast(state, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
         t += dt
-        if i % 10 == 0:
-            all_time.append(t)
-            all_r.append(np.array(state.r))
-            all_stp_x.append(np.array(state.stp.x))
-            all_stp_u.append(np.array(state.stp.u))
+        all_time.append(t)
+        all_r.append(np.array(state.r))
+        all_stp_x.append(np.array(state.stp.x))
+        all_stp_u.append(np.array(state.stp.u))
     
     # Phase 3: S2 presentation
     for _ in range(n_s2):
@@ -484,11 +483,11 @@ def run_trial_with_recording(
         all_stp_x.append(np.array(state.stp.x))
         all_stp_u.append(np.array(state.stp.u))
     
-    # Phase 4: Delay (sparse recording)
+    # Phase 4: Delay
     for i in range(n_delay):
         state = cann_step_fast(state, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
         t += dt
-        if i % 100 == 0:
+        if i % 10 == 0:  # Record every 10 steps
             all_time.append(t)
             all_r.append(np.array(state.r))
             all_stp_x.append(np.array(state.stp.x))
@@ -570,12 +569,12 @@ def run_fast_experiment_with_recording(
     if stp_type == 'std':
         params = CANNParamsNumeric(
             N=100, J0=0.13, a=0.5, tau=10.0, k=0.0018, rho=1.0, dt=0.1,
-            tau_d=280.0, tau_f=20.0, U=0.45,
+            tau_d=3.0, tau_f=0.3, U=0.5,
         )
     else:  # stf
         params = CANNParamsNumeric(
             N=100, J0=0.06, a=0.4, tau=10.0, k=0.005, rho=1.0, dt=0.1,
-            tau_d=20.0, tau_f=620.0, U=0.08,
+            tau_d=0.3, tau_f=5.0, U=0.2,
         )
     
     trial_config = TrialConfig(
