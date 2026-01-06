@@ -4,6 +4,7 @@ Reproduce Figure 2: Single-Layer CANN Experiments (JAX 加速版)
 ===============================================================
 
 使用 JAX 向量化加速，比原版快 20-50x。
+支持 GPU 加速（如果可用）。
 
 Generates:
 - Fig 2A-C: STD-dominated CANN (repulsion effect)
@@ -11,6 +12,8 @@ Generates:
 
 Usage:
     python scripts/run_fig2.py [--output_dir results/fig2] [--quick]
+    python scripts/run_fig2.py --force_gpu  # 强制使用 GPU
+    python scripts/run_fig2.py --force_cpu  # 强制使用 CPU
 """
 
 import os
@@ -18,12 +21,37 @@ import sys
 import argparse
 import time
 from pathlib import Path
+from datetime import datetime
+
+# Parse arguments early to configure JAX before import
+def parse_args_early():
+    """Parse only GPU/CPU args before JAX import."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--force_gpu', action='store_true')
+    parser.add_argument('--force_cpu', action='store_true')
+    args, _ = parser.parse_known_args()
+    return args
+
+early_args = parse_args_early()
+
+# Configure JAX backend BEFORE importing JAX-dependent modules
+if early_args.force_gpu:
+    os.environ['JAX_PLATFORM_NAME'] = 'gpu'
+elif early_args.force_cpu:
+    os.environ['JAX_PLATFORM_NAME'] = 'cpu'
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import matplotlib.pyplot as plt
+import jax
+
+# Print JAX configuration
+print(f"\nJAX 配置:")
+print(f"  JAX 版本: {jax.__version__}")
+print(f"  可用设备: {jax.devices()}")
+print(f"  默认后端: {jax.default_backend()}")
 
 from src.experiments.fast_single_layer import (
     run_fast_experiment,
@@ -52,9 +80,15 @@ def main():
     parser.add_argument('--isi', type=float, default=1000.0,
                         help='Inter-stimulus interval (ms)')
     parser.add_argument('--quick', action='store_true',
-                        help='Quick test mode (2 runs × 10 trials)')
+                        help='Quick test mode (2 runs x 10 trials)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
+    parser.add_argument('--force_gpu', action='store_true',
+                        help='Force GPU backend')
+    parser.add_argument('--force_cpu', action='store_true',
+                        help='Force CPU backend')
+    parser.add_argument('--timestamp_dir', action='store_true',
+                        help='Create timestamped output subdirectory')
     args = parser.parse_args()
     
     # Quick test mode
@@ -63,14 +97,18 @@ def main():
         args.n_trials = 10
         args.delta_step = 10.0
     
-    # Setup
+    # Setup output directory
     output_dir = Path(args.output_dir)
+    if args.timestamp_dir:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_dir = output_dir / timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
+    
     setup_figure_style()
     
     total_trials = 2 * args.n_runs * args.n_trials
     
-    print("=" * 60)
+    print("\n" + "=" * 60)
     print("Figure 2: Single-Layer CANN Experiments (JAX 加速版)")
     print("=" * 60)
     print(f"\n配置:")
@@ -80,6 +118,7 @@ def main():
     print(f"  Delta 步长: {args.delta_step}°")
     print(f"  ISI: {args.isi} ms")
     print(f"  输出目录: {output_dir}")
+    print(f"  后端: {jax.default_backend().upper()}")
     
     total_start = time.time()
     
@@ -278,6 +317,7 @@ def main():
     print("\n" + "=" * 60)
     print("Figure 2 reproduction complete!")
     print("=" * 60)
+    print(f"  后端: {jax.default_backend().upper()}")
     print(f"  总耗时: {total_time:.1f} 秒")
     print(f"  总 Trials: {total_trials}")
     print(f"  平均速度: {total_trials/total_time:.1f} trials/秒")
@@ -287,7 +327,7 @@ def main():
         # Estimate full experiment time
         full_trials = 2 * 20 * 100
         estimated_full_time = full_trials / (total_trials / total_time)
-        print(f"\n  预计完整实验 (20 runs × 100 trials) 耗时: {estimated_full_time/60:.1f} 分钟")
+        print(f"\n  预计完整实验 (20 runs x 100 trials) 耗时: {estimated_full_time/60:.1f} 分钟")
         print("\n注意：这是快速测试模式。")
         print("完整实验请运行: python scripts/run_fig2.py")
 
