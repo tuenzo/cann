@@ -316,3 +316,10 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
+    # Main figure (with STP heatmaps)
+    fig = plot_fig2_single_layer_v2(
+        std_plot_data, stf_plot_data,
+        save_path=output_dir / 'fig2_complete_with_stp.png'
+    )
+    print(f"  Saved: {output_dir / 'fig2_complete_with_stp.png'}")

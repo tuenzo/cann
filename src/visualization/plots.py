@@ -539,3 +539,144 @@ def create_summary_figure(
     
     return fig
 
+
+
+def plot_stp_all_neurons(
+    time: np.ndarray,
+    stp_var: np.ndarray,
+    theta: np.ndarray,
+    var_name: str = 'x (availability)',
+    ax: Optional[plt.Axes] = None,
+    title: str = "STP Dynamics (All Neurons)",
+    cmap: str = 'viridis',
+) -> plt.Axes:
+    """Plot STP variable for ALL neurons over time (heatmap).
+    
+    Args:
+        time: Time points (ms), shape (T,)
+        stp_var: STP variable array, shape (T, N)
+        theta: Preferred orientations (degrees), shape (N,)
+        var_name: Variable name for title and colorbar
+        ax: Matplotlib axes
+        title: Plot title
+        cmap: Colormap name
+        
+    Returns:
+        Matplotlib axes
+    """
+    if ax is None:
+        _, ax = plt.subplots(figsize=(10, 4))
+    
+    im = ax.imshow(
+        stp_var.T,
+        aspect='auto',
+        origin='lower',
+        extent=[time[0], time[-1], theta[0], theta[-1]],
+        cmap=cmap,
+        vmin=np.min(stp_var),
+        vmax=np.max(stp_var),
+    )
+    
+    plt.colorbar(im, ax=ax, label=var_name)
+    
+    ax.set_xlabel('Time (ms)')
+    ax.set_ylabel('Preferred Orientation (°)')
+    ax.set_title(title)
+    
+    return ax
+
+
+def plot_fig2_single_layer_v2(
+    std_results: dict,
+    stf_results: dict,
+    figsize: Tuple[int, int] = (16, 12),
+    save_path: Optional[str] = None,
+) -> plt.Figure:
+    """Reproduce Figure 2: Single-layer CANN experiments (with STP heatmaps).
+    
+    Args:
+        std_results: Results from STD-dominated experiment
+        stf_results: Results from STF-dominated experiment
+        figsize: Figure size
+        save_path: Path to save figure
+        
+    Returns:
+        Matplotlib figure
+    """
+    fig = plt.figure(figsize=figsize)
+    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.4)
+    
+    # Row 1: STD-dominated (A-C)
+    # A: Neural activity
+    ax1 = fig.add_subplot(gs[0, 0])
+    if 'activity' in std_results:
+        plot_neural_activity(
+            std_results['time'], std_results['activity'], 
+            std_results['theta'], ax=ax1, title='A. STD Neural Activity'
+        )
+    
+    # A2: STP x (all neurons)
+    ax1b = fig.add_subplot(gs[0, 1])
+    if 'stp_x' in std_results:
+        plot_stp_all_neurons(
+            std_results['time'], std_results['stp_x'],
+            std_results['theta'], var_name='x (availability)',
+            ax=ax1b, title='A2. STD STP x (All Neurons)', cmap='hot'
+        )
+    
+    # B: STP dynamics (single neuron)
+    ax2 = fig.add_subplot(gs[0, 2])
+    if 'stp_x' in std_results:
+        plot_stp_dynamics(
+            std_results['time'], std_results['stp_x'], std_results['stp_u'],
+            neuron_idx=std_results.get('stim_neuron', 45),
+            ax=ax2, title='B. STD Dynamics'
+        )
+    
+    # C: Adjustment error
+    ax3 = fig.add_subplot(gs[0, 2])
+    plot_adjustment_error(
+        std_results['delta'], std_results['errors'],
+        ax=ax3, title='C. STD Adjustment Error (Repulsion)',
+        color='#E74C3C'
+    )
+    
+    # Row 2: STF-dominated (D-F)
+    # D: Neural activity
+    ax4 = fig.add_subplot(gs[1, 0])
+    if 'activity' in stf_results:
+        plot_neural_activity(
+            stf_results['time'], stf_results['activity'],
+            stf_results['theta'], ax=ax4, title='D. STF Neural Activity'
+        )
+    
+    # D2: STP u (all neurons)
+    ax4b = fig.add_subplot(gs[1, 1])
+    if 'stp_u' in stf_results:
+        plot_stp_all_neurons(
+            stf_results['time'], stf_results['stp_u'],
+            stf_results['theta'], var_name='u (release prob.)',
+            ax=ax4b, title='D2. STF STP u (All Neurons)', cmap='cool'
+        )
+    
+    # E: STP dynamics (single neuron)
+    ax5 = fig.add_subplot(gs[1, 1])
+    if 'stp_u' in stf_results:
+        plot_stp_dynamics(
+            stf_results['time'], stf_results['stp_x'], stf_results['stp_u'],
+            neuron_idx=stf_results.get('stim_neuron', 45),
+            ax=ax5, title='E. STF Dynamics'
+        )
+    
+    # F: Adjustment error
+    ax6 = fig.add_subplot(gs[1, 2])
+    plot_adjustment_error(
+        stf_results['delta'], stf_results['errors'],
+        ax=ax6, title='F. STF Adjustment Error (Attraction)',
+        color='#3498DB'
+    )
+    
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+    
+    return fig
