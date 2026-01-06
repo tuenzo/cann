@@ -26,8 +26,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from src.experiments.fast_single_layer import (
-    run_fast_experiment,
     run_fast_experiment_with_recording,
+)
+from src.experiments.fast_single_layer_optimized import (
+    run_fast_experiment_optimized as run_fast_experiment,
 )
 from src.visualization.plots import (
     setup_figure_style,
@@ -55,6 +57,8 @@ def main():
                         help='Quick test mode (2 runs × 10 trials)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
+    parser.add_argument('--batch_size', type=int, default=10,
+                        help='Batch size for jax.vmap optimization (default: 10)')
     args = parser.parse_args()
     
     # Quick test mode
@@ -79,6 +83,7 @@ def main():
     print(f"  总 Trials: {total_trials}")
     print(f"  Delta 步长: {args.delta_step}°")
     print(f"  ISI: {args.isi} ms")
+    print(f"  Batch size: {args.batch_size} (jax.vmap)")
     print(f"  输出目录: {output_dir}")
     
     total_start = time.time()
@@ -96,6 +101,7 @@ def main():
         isi=args.isi,
         seed=args.seed,
         verbose=True,
+        batch_size=args.batch_size,
     )
     
     print(f"\n✅ STD 实验完成！耗时: {std_results['elapsed_time']:.1f} 秒")
@@ -122,6 +128,7 @@ def main():
         isi=args.isi,
         seed=args.seed + 10000,
         verbose=True,
+        batch_size=args.batch_size,
     )
     
     print(f"\n✅ STF 实验完成！耗时: {stf_results['elapsed_time']:.1f} 秒")
