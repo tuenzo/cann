@@ -24,7 +24,10 @@ from ..decoding import decode_orientation
 
 
 class TrialConfig(NamedTuple):
-    """Trial configuration for fast simulation."""
+    """Trial configuration for fast simulation.
+    
+    All parameters from Table 1 and paper requirements.
+    """
     N: int = 100
     dt: float = 0.1
     s1_duration: float = 200.0
@@ -32,26 +35,32 @@ class TrialConfig(NamedTuple):
     s2_duration: float = 200.0
     delay: float = 3400.0
     cue_duration: float = 500.0
-    # Stimulus parameters
-    alpha_ext: float = 20.0
-    a_ext: float = 0.3  # radians
-    # Cue parameters
-    alpha_cue: float = 2.5
-    a_cue: float = 0.4  # radians
+    # Stimulus parameters (External Input, Table 1)
+    alpha_sti: float = 20.0        # Strength of external stimulus
+    a_sti: float = 0.3               # Spatial scale of external stimulus (radians)
+    mu_sti: float = 0.5               # Noise strength of external stimulus
+    # Cue parameters (External Input, Table 1)
+    alpha_cue: float = 2.5        # Strength of external cue
+    a_cue: float = 0.4               # Spatial scale of external cue (radians)
+    mu_cue: float = 1.0               # Noise strength of external cue
 
 
 class CANNParamsNumeric(NamedTuple):
-    """Numeric-only CANN parameters for JIT compilation."""
+    """Numeric-only CANN parameters for JIT compilation.
+    
+    Note: These are default values (STD-dominated).
+    For STF-dominated, these will be overridden in run_fast_experiment_optimized.
+    """
     N: int = 100
-    J0: float = 0.5
-    a: float = 30.0
-    tau: float = 1.0
-    k: float = 0.5
+    J0: float = 0.13                  # STD: 0.13, STF: 0.09
+    a: float = 0.5                     # STD: 0.5, STF: 0.15 (radians)
+    tau: float = 10.0                  # Time constant (ms), 0.01s = 10ms
+    k: float = 0.0018                  # STD: 0.0018, STF: 0.0095
     rho: float = 1.0
-    dt: float = 0.1
-    tau_d: float = 3.0
-    tau_f: float = 0.3
-    U: float = 0.3
+    dt: float = 0.1                     # Time step (ms)
+    tau_d: float = 3.0                  # STD: 3.0, STF: 0.3 (s)
+    tau_f: float = 0.3                  # STD: 0.3, STF: 5.0 (s)
+    U: float = 0.5                      # STD: 0.5, STF: 0.2
 
 
 def cann_step_fast(
@@ -164,12 +173,12 @@ def run_trial_vectorized(
         return amplitude * jnp.exp(-dx**2 / (2 * width**2))
     
     I_s1_batch = make_stimulus_batch(
-        theta_s1_batch, trial_config.alpha_ext,
-        trial_config.a_ext * 180 / jnp.pi
+        theta_s1_batch, trial_config.alpha_sti,
+        trial_config.a_sti * 180 / jnp.pi
     )
     I_s2_batch = make_stimulus_batch(
-        theta_s2_batch, trial_config.alpha_ext,
-        trial_config.a_ext * 180 / jnp.pi
+        theta_s2_batch, trial_config.alpha_sti,
+        trial_config.a_sti * 180 / jnp.pi
     )
     I_cue = jnp.zeros((batch_size, N)) + trial_config.alpha_cue * jnp.exp(
         -(theta[None, :])**2 / (2 * (trial_config.a_cue * 180 / jnp.pi)**2)
@@ -278,14 +287,16 @@ def run_fast_experiment_optimized(
     
     # Set parameters based on STP type (Table 1)
     if stp_type == 'std':
+        # STD-dominated (Fig. 2A-C): Repulsion effect
         params = CANNParamsNumeric(
             N=100, J0=0.13, a=0.5, tau=10.0, k=0.0018, rho=1.0, dt=0.1,
-            tau_d=280.0, tau_f=20.0, U=0.45,
+            tau_d=3.0, tau_f=0.3, U=0.5,
         )
     else:  # stf
+        # STF-dominated (Fig. 2D-F): Attraction effect
         params = CANNParamsNumeric(
-            N=100, J0=0.06, a=0.4, tau=10.0, k=0.005, rho=1.0, dt=0.1,
-            tau_d=20.0, tau_f=620.0, U=0.08,
+            N=100, J0=0.09, a=0.15, tau=10.0, k=0.0095, rho=1.0, dt=0.1,
+            tau_d=0.3, tau_f=5.0, U=0.2,
         )
     
     trial_config = TrialConfig(
