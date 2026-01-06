@@ -8,5 +8,5 @@ from .plots import (
     plot_fig2_single_layer,
     plot_fig2_single_layer_v2,  # New version with STP heatmaps
     plot_fig3_two_layer,
-    plot_supplementary,
+    plot_stp_all_neurons,  # New: STP heatmap for all neurons
 )
