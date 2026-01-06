@@ -24,7 +24,9 @@ ps -p $PID -o pid,etime,pcpu,pmem,cmd --no-headers | awk '{
 
 echo ""
 echo "💾 系统资源:"
+echo "  CPU 配置: $(nproc) 核心 ($(grep -c processor /proc/cpuinfo) 逻辑处理器)"
 free -h | grep Mem | awk '{printf "  内存: %s / %s (可用: %s)\n", $3, $2, $7}'
+echo "  CPU 总使用率: $(top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1)%"
 
 echo ""
 echo "📁 输出文件:"
@@ -47,6 +49,8 @@ echo "  预计总时间: ~210 分钟 (3.5 小时)"
 echo ""
 echo "💡 提示:"
 echo "  - 程序正在正常运行，CPU 使用率高是正常的"
+echo "  - JAX 自动使用多核并行（CPU 使用率可能超过 100%）"
+echo "  - 系统配置: $(nproc) 核心可用"
 echo "  - 完整实验需要较长时间，请耐心等待"
 echo "  - 可以使用 Ctrl+C 中断（会丢失当前进度）"
 echo "  - 建议使用 nohup 或 screen 在后台运行"
