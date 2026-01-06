@@ -35,7 +35,7 @@ from src.experiments.fast_single_layer_optimized import (
 )
 from src.visualization.plots import (
     setup_figure_style,
-    plot_fig2_single_layer,
+    plot_fig2_single_layer_v2,
     plot_neural_activity,
     plot_stp_dynamics,
     plot_adjustment_error,
