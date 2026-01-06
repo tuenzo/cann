@@ -29,7 +29,10 @@ from src.experiments.fast_single_layer import (
     run_fast_experiment_with_recording,
 )
 from src.experiments.fast_single_layer_optimized import (
-    run_fast_experiment_optimized as run_fast_experiment,
+    run_fast_experiment_optimized as run_fast_experiment_single,
+)
+from src.experiments.run_experiment_multi_process import (
+    run_experiment_multi_process as run_fast_experiment_multi,
 )
 from src.visualization.plots import (
     setup_figure_style,
@@ -59,6 +62,10 @@ def main():
                         help='Random seed')
     parser.add_argument('--batch_size', type=int, default=10,
                         help='Batch size for jax.vmap optimization (default: 10)')
+    parser.add_argument('--n_workers', type=int, default=None,
+                        help='Number of worker processes for multi-core optimization (default: all CPU cores)')
+    parser.add_argument('--use_multiprocess', action='store_true',
+                        help='Use multiprocessing for multi-core optimization (default: False)')
     args = parser.parse_args()
     
     # Quick test mode
@@ -83,7 +90,15 @@ def main():
     print(f"  总 Trials: {total_trials}")
     print(f"  Delta 步长: {args.delta_step}°")
     print(f"  ISI: {args.isi} ms")
-    print(f"  Batch size: {args.batch_size} (jax.vmap)")
+    # Select experiment runner
+    if args.use_multiprocess:
+        from multiprocessing import cpu_count
+        n_workers = args.n_workers or cpu_count()
+        print(f"  使用多进程并行 ({n_workers} workers)")
+        print(f"  Batch size: {args.batch_size} (jax.vmap per worker)")
+    else:
+        print(f"  使用单进程 + jax.vmap")
+        print(f"  Batch size: {args.batch_size} (jax.vmap)")
     print(f"  输出目录: {output_dir}")
     
     total_start = time.time()
@@ -93,16 +108,29 @@ def main():
     print("[1/4] Running STD-dominated experiment (repulsion)...")
     print("=" * 60)
     
-    std_results = run_fast_experiment(
-        stp_type='std',
-        n_runs=args.n_runs,
-        n_trials_per_run=args.n_trials,
-        delta_step=args.delta_step,
-        isi=args.isi,
-        seed=args.seed,
-        verbose=True,
-        batch_size=args.batch_size,
-    )
+    if args.use_multiprocess:
+        std_results = run_fast_experiment_multi(
+            stp_type='std',
+            n_runs=args.n_runs,
+            n_trials_per_run=args.n_trials,
+            delta_step=args.delta_step,
+            isi=args.isi,
+            seed=args.seed,
+            verbose=True,
+            n_workers=args.n_workers,
+            batch_size_per_worker=args.batch_size,
+        )
+    else:
+        std_results = run_fast_experiment_single(
+            stp_type='std',
+            n_runs=args.n_runs,
+            n_trials_per_run=args.n_trials,
+            delta_step=args.delta_step,
+            isi=args.isi,
+            seed=args.seed,
+            verbose=True,
+            batch_size=args.batch_size,
+        )
     
     print(f"\n✅ STD 实验完成！耗时: {std_results['elapsed_time']:.1f} 秒")
     
@@ -120,16 +148,29 @@ def main():
     print("[3/4] Running STF-dominated experiment (attraction)...")
     print("=" * 60)
     
-    stf_results = run_fast_experiment(
-        stp_type='stf',
-        n_runs=args.n_runs,
-        n_trials_per_run=args.n_trials,
-        delta_step=args.delta_step,
-        isi=args.isi,
-        seed=args.seed + 10000,
-        verbose=True,
-        batch_size=args.batch_size,
-    )
+    if args.use_multiprocess:
+        stf_results = run_fast_experiment_multi(
+            stp_type='stf',
+            n_runs=args.n_runs,
+            n_trials_per_run=args.n_trials,
+            delta_step=args.delta_step,
+            isi=args.isi,
+            seed=args.seed + 10000,
+            verbose=True,
+            n_workers=args.n_workers,
+            batch_size_per_worker=args.batch_size,
+        )
+    else:
+        stf_results = run_fast_experiment_single(
+            stp_type='stf',
+            n_runs=args.n_runs,
+            n_trials_per_run=args.n_trials,
+            delta_step=args.delta_step,
+            isi=args.isi,
+            seed=args.seed + 10000,
+            verbose=True,
+            batch_size=args.batch_size,
+        )
     
     print(f"\n✅ STF 实验完成！耗时: {stf_results['elapsed_time']:.1f} 秒")
     
