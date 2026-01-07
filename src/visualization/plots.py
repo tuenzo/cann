@@ -49,6 +49,8 @@ def plot_neural_activity(
     title: str = "Neural Activity",
     cmap: str = 'hot',
     vmax: Optional[float] = None,
+    interpolate: bool = False,
+    target_length: Optional[int] = None,
 ) -> plt.Axes:
     """Plot neural activity heatmap over time.
     
@@ -60,12 +62,28 @@ def plot_neural_activity(
         title: Plot title
         cmap: Colormap name
         vmax: Maximum value for colormap
+        interpolate: Whether to interpolate time series (default: False)
+        target_length: Target number of time points (default: None, use original)
         
     Returns:
         Matplotlib axes
     """
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 4))
+    
+    # 插值扩充（如果启用）
+    if interpolate and target_length is not None and len(time) < target_length:
+        # 创建新的时间网格（更密集）
+        time_dense = np.linspace(time[0], time[-1], target_length)
+        
+        # 对每个神经元的活动进行插值
+        activity_dense = np.zeros((target_length, activity.shape[1]))
+        for i in range(activity.shape[1]):
+            activity_dense[:, i] = np.interp(time_dense, time, activity[:, i])
+        
+        # 使用插值后的数据
+        time = time_dense
+        activity = activity_dense
     
     if vmax is None:
         vmax = np.max(activity)
@@ -96,6 +114,8 @@ def plot_stp_dynamics(
     neuron_idx: int,
     ax: Optional[plt.Axes] = None,
     title: str = "STP Dynamics",
+    interpolate: bool = False,
+    target_length: Optional[int] = None,
 ) -> plt.Axes:
     """Plot STP variables over time for a single neuron.
     
@@ -106,6 +126,8 @@ def plot_stp_dynamics(
         neuron_idx: Index of neuron to plot
         ax: Matplotlib axes
         title: Plot title
+        interpolate: Whether to interpolate time series (default: False)
+        target_length: Target number of time points (default: None, use original)
         
     Returns:
         Matplotlib axes
@@ -113,9 +135,26 @@ def plot_stp_dynamics(
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 3))
     
-    ax.plot(time, stp_x[:, neuron_idx], 'b-', label='x (availability)', linewidth=2)
-    ax.plot(time, stp_u[:, neuron_idx], 'r-', label='u (release prob.)', linewidth=2)
-    ax.plot(time, stp_x[:, neuron_idx] * stp_u[:, neuron_idx], 
+    # 插值扩充（如果启用）
+    if interpolate and target_length is not None and len(time) < target_length:
+        # 创建新的时间网格（更密集）
+        time_dense = np.linspace(time[0], time[-1], target_length)
+        
+        # 对单个神经元的 STP 变量进行插值
+        stp_x_interp = np.interp(time_dense, time, stp_x[:, neuron_idx])
+        stp_u_interp = np.interp(time_dense, time, stp_u[:, neuron_idx])
+        
+        # 使用插值后的数据
+        time = time_dense
+        x_data = stp_x_interp
+        u_data = stp_u_interp
+    else:
+        x_data = stp_x[:, neuron_idx]
+        u_data = stp_u[:, neuron_idx]
+    
+    ax.plot(time, x_data, 'b-', label='x (availability)', linewidth=2)
+    ax.plot(time, u_data, 'r-', label='u (release prob.)', linewidth=2)
+    ax.plot(time, x_data * u_data, 
             'g--', label='u·x (efficacy)', linewidth=2)
     
     ax.set_xlabel('Time (ms)')
@@ -549,6 +588,8 @@ def plot_stp_all_neurons(
     ax: Optional[plt.Axes] = None,
     title: str = "STP Dynamics (All Neurons)",
     cmap: str = 'viridis',
+    interpolate: bool = False,
+    target_length: Optional[int] = None,
 ) -> plt.Axes:
     """Plot STP variable for ALL neurons over time (heatmap).
     
@@ -560,12 +601,28 @@ def plot_stp_all_neurons(
         ax: Matplotlib axes
         title: Plot title
         cmap: Colormap name
+        interpolate: Whether to interpolate time series (default: False)
+        target_length: Target number of time points (default: None, use original)
         
     Returns:
         Matplotlib axes
     """
     if ax is None:
         _, ax = plt.subplots(figsize=(10, 4))
+    
+    # 插值扩充（如果启用）
+    if interpolate and target_length is not None and len(time) < target_length:
+        # 创建新的时间网格（更密集）
+        time_dense = np.linspace(time[0], time[-1], target_length)
+        
+        # 对每个神经元的 STP 变量进行插值
+        stp_var_dense = np.zeros((target_length, stp_var.shape[1]))
+        for i in range(stp_var.shape[1]):
+            stp_var_dense[:, i] = np.interp(time_dense, time, stp_var[:, i])
+        
+        # 使用插值后的数据
+        time = time_dense
+        stp_var = stp_var_dense
     
     im = ax.imshow(
         stp_var.T,
