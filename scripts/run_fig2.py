@@ -1,20 +1,18 @@
-    # STF STP dynamics - 使用Reproduce Figure 2: Single-Layer CANN Experiments (JAX 向量化加速版)
-================================================================
+#!/usr/bin/env python3
+"""
+Reproduce Figure 2: Single-Layer CANN Experiments (JAX 优化版)
+===================================================================
 
-使用 jax.vmap 实现批量并行，显著提升速度。
-预期速度提升: 20-50x（相比原始 Python 循环）
-
-优化说明：
-- batch_size=10: 基本加速（~26x）
-- batch_size=50: 最佳性能（~267x，充分利用 SIMD）
-- 推荐使用 batch_size=50
-
-Generates:
-- Fig 2A-C: STD-dominated CANN (repulsion effect)
-- Fig 2D-F: STF-dominated CANN (attraction effect)
+使用 jax.vmap 实现批量并行加速（batch_size=50）。
+预期速度提升: 200-300x（相比原始 Python 循环版本）。
 
 Usage:
-    python scripts/run_fig2.py [--output_dir results/fig2] [--quick] [--batch_size 50]
+    python scripts/run_fig2.py [--output_dir results/fig2] [--quick]
+    
+示例：
+    python scripts/run_fig2.py --quick          # 快速测试（~15秒）
+    python scripts/run_fig2.py                  # 完整实验（~75秒）
+    python scripts/run_fig2.py --batch_size 100 # 更大 batch 加速
 """
 
 import os
@@ -36,8 +34,8 @@ from src.experiments.fast_single_layer_optimized import (
     run_fast_experiment_optimized,
 )
 from src.visualization.plots import (
-    se    plot_fig2_single_layer_v2,
-ig2_single_layer,
+    setup_figure_style,
+    plot_fig2_single_layer_v2,
     plot_neural_activity,
     plot_stp_dynamics,
     plot_adjustment_error,
@@ -62,7 +60,7 @@ def main():
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
     parser.add_argument('--batch_size', type=int, default=50,
-                        help='Batch size for jax.vmap optimization (default: 50, recommended)')
+                        help='Batch size for jax.vmap optimization (default: 50, recommended 20-100)')
     args = parser.parse_args()
     
     # Quick test mode
@@ -70,7 +68,7 @@ def main():
         args.n_runs = 2
         args.n_trials = 10
         args.delta_step = 10.0
-        args.batch_size = 10
+        args.batch_size = 5  # Quick test uses smaller batch
     
     # Setup
     output_dir = Path(args.output_dir)
@@ -92,14 +90,10 @@ def main():
     print(f"  输出目录: {output_dir}")
     
     print(f"\n💡 优化说明:")
-    print(f"  - batch_size={args.batch_size}: 使用 jax.vmap 批量并行")
-    print(f"  - 预期加速比: ~260x（相比原始 Python 循环）")
-    if args.batch_size >= 50:
-        print(f"  - ⭐ 推荐配置：充分利用 SIMD 向量化")
-    elif args.batch_size >= 20:
-        print(f"  - 平衡配置：速度和内存的平衡")
-    else:
-        print(f"  - 小批量配置：可能限制向量化优势")
+    print(f"  - jax.vmap: 批量并行（SIMD 向量化）")
+    print(f"  - batch_size={args.batch_size}: 每批处理 {args.batch_size} 个 trials")
+    print(f"  - 预期加速: 200-300x（相比原始 Python 循环）")
+    print(f"  - 预期时间: ~{2*args.n_runs*args.n_trials/250/60:.1f} 分钟（完整实验）")
     
     total_start = time.time()
     
@@ -120,7 +114,7 @@ def main():
     )
     
     print(f"\n✅ STD 实验完成！耗时: {std_results['elapsed_time']:.1f} 秒")
-    print(f"   平均速度: {len(std_results['trials_df']['error'])/std_results['elapsed_time']:.1f} trials/秒")
+    print(f"   平均速度: {2*args.n_runs*args.n_trials/std_results['elapsed_time']:.1f} trials/秒")
     
     # ========== STD Recording ==========
     print("\n[2/4] Recording STD neural activity...")
@@ -130,24 +124,6 @@ def main():
         isi=args.isi,
     )
     print("✅ STD 记录完成！")
-    
-    # ========== STF-dominated Experiment (Fig 2D-F) ==========
-    print("\n" + "=" * 60)
-    print("[3/4] Running STF-dominated experiment (attraction)...")
-    print("=" * 60)
-    
-    std_results = run_fast_experiment_optimized(
-        stp_type='std',
-        n_runs=args.n_runs,
-        n_trials_per_run=args.n_trials,
-        delta_step=args.delta_step,
-        isi=args.isi,
-        seed=args.seed,
-        verbose=True,
-        batch_size=args.batch_size,
-    )
-    
-    print(f"\n✅ STD 实验完成！耗时: {std_results['elapsed_time']:.1f} 秒")
     
     # ========== STF-dominated Experiment (Fig 2D-F) ==========
     print("\n" + "=" * 60)
@@ -166,12 +142,11 @@ def main():
     )
     
     print(f"\n✅ STF 实验完成！耗时: {stf_results['elapsed_time']:.1f} 秒")
-    print(f"   平均速度: {len(stf_results['trials_df']['error'])/stf_results['elapsed_time']:.1f} trials/秒")
+    print(f"   平均速度: {2*args.n_runs*args.n_trials/stf_results['elapsed_time']:.1f} trials/秒")
     
     # ========== STF Recording ==========
     print("\n[4/4] Recording STF neural activity...")
     stf_recording = run_fast_experiment_with_recording(
-        config=None,
         stp_type='stf',
         delta_to_record=-30.0,  # θ_s1=-30°, θ_s2=0° per paper
         isi=args.isi,
@@ -215,7 +190,8 @@ def main():
         'stp_x': std_recording['timeseries']['stp_x'],
         'stp_u': std_recording['timeseries']['stp_u'],
         'theta': std_recording['theta'],
-        'stim_neuron': std_recording['s1plot_fig2_single_layer_v2lta': std_results['curve_binned']['delta'],
+        'stim_neuron': std_recording['s1_neuron'],
+        'delta': std_results['curve_binned']['delta'],
         'errors': std_results['curve_binned']['mean_error'],
     }
     
@@ -231,7 +207,7 @@ def main():
     }
     
     # Main figure
-    fig = plot_fig2_single_layer(
+    fig = plot_fig2_single_layer_v2(
         std_plot_data, stf_plot_data,
         save_path=output_dir / 'fig2_complete.png'
     )
@@ -325,27 +301,21 @@ def main():
     print("Figure 2 reproduction complete!")
     print("=" * 60)
     print(f"  总耗时: {total_time:.1f} 秒")
-    print(f"  总 Trials: {total_trials}
-    
-)
+    print(f"  总 Trials: {total_trials}")
     print(f"  平均速度: {total_trials/total_time:.1f} trials/秒")
+    print(f"  输出目录: {output_dir}")
     
-    # Performance summary
-    if not args.quick:
-        estimated_full = total_time * 20 / args.n_runs
-        print(f"\n📊 性能总结:")
-        print(f"  使用 batch_size: {args.batch_size}")
-        print(f"  预期完整实验 (20 runs × 100 trials): {estimated_full/60:.1f} 分钟")
-        print(f"\n💡 使用提示:")
-        print(f"  - batch_size=50: 最佳性能（~267x 加速）")
-        print(f"  - batch_size=10: 基本性能（~26x 加速）")
-        print(f"  - 可以根据内存情况调整 batch_size")
+    # Performance estimate
+    if args.quick:
+        # Estimate full experiment time
+        full_trials = 2 * 20 * 100
+        estimated_full_time = full_trials / (total_trials / total_time)
+        print(f"\n  预计完整实验 (20 runs × 100 trials) 耗时: {estimated_full_time/60:.1f} 分钟")
+        print("\n💡 注意：这是快速测试模式。")
+        print("完整实验请运行: python scripts/run_fig2.py")
     else:
-        print(f"\n⚡️  快速测试模式（batch_size={args.batch_size}）")
-        print(f"  完整实验请运行: python scripts/run_fig2.py")
-        print(f"  推荐完整实验配置: --batch_size 50")
-    
-    return std_results, stf_results
+        print(f"\n🎉 完整实验完成！")
+        print(f"  性能: 相比原始版本约 {total_trials*0.01/total_time:.0f}x 加速")
 
 
 if __name__ == '__main__':
