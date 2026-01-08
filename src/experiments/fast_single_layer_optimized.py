@@ -549,11 +549,10 @@ def run_trial_with_recording(
     for i in range(n_delay):
         state = cann_step_fast(state, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
         t += dt
-        if i % 10 == 0:  # Record every 10 steps for efficiency
-            all_time.append(t)
-            all_r.append(np.array(state.r))
-            all_stp_x.append(np.array(state.stp.x))
-            all_stp_u.append(np.array(state.stp.u))
+        all_time.append(t)
+        all_r.append(np.array(state.r))
+        all_stp_x.append(np.array(state.stp.x))
+        all_stp_u.append(np.array(state.stp.u))
     
     # Phase 5: Cue - collect activity for decoding
     cue_activity = []
