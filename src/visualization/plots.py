@@ -326,10 +326,15 @@ def plot_temporal_window(
 def plot_fig2_single_layer(
     std_results: dict,
     stf_results: dict,
-    figsize: Tuple[int, int] = (14, 10),
+    figsize: Tuple[int, int] = (16, 14),
     save_path: Optional[str] = None,
 ) -> plt.Figure:
     """Reproduce Figure 2: Single-layer CANN experiments.
+    
+    Layout: 2 rows x 3 columns
+    - Column 0 (A/D): Two vertically stacked subplots (neural activity + STP heatmap)
+    - Column 1 (B/E): STP dynamics (single neuron)
+    - Column 2 (C/F): Adjustment error curves
     
     Args:
         std_results: Results from STD-dominated experiment
@@ -341,57 +346,85 @@ def plot_fig2_single_layer(
         Matplotlib figure
     """
     fig = plt.figure(figsize=figsize)
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.3, wspace=0.3)
     
-    # Row 1: STD-dominated (A-C)
-    # A: Neural activity
-    ax1 = fig.add_subplot(gs[0, 0])
+    # Create outer GridSpec: 2 rows x 3 columns
+    outer_gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.3)
+    
+    # ========== Row 0: STD-dominated (A-C) ==========
+    
+    # A: Nested GridSpec for two vertically stacked subplots (neural activity + STP x)
+    gs_A = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer_gs[0, 0], hspace=0.5)
+    
+    # A-upper: Neural activity heatmap
+    ax_A_upper = fig.add_subplot(gs_A[0])
     if 'activity' in std_results:
         plot_neural_activity(
-            std_results['time'], std_results['activity'], 
-            std_results['theta'], ax=ax1, title='A. STD Neural Activity'
+            std_results['time'], std_results['activity'],
+            std_results['theta'], ax=ax_A_upper, title='A1. STD Neural Activity'
         )
     
-    # B: STP dynamics
-    ax2 = fig.add_subplot(gs[0, 1])
+    # A-lower: STP x heatmap (all neurons)
+    ax_A_lower = fig.add_subplot(gs_A[1])
+    if 'stp_x' in std_results:
+        plot_stp_all_neurons(
+            std_results['time'], std_results['stp_x'],
+            std_results['theta'], var_name='x (availability)',
+            ax=ax_A_lower, title='A2. STD STP x', cmap='hot'
+        )
+    
+    # B: STP dynamics (single neuron)
+    ax_B = fig.add_subplot(outer_gs[0, 1])
     if 'stp_x' in std_results:
         plot_stp_dynamics(
             std_results['time'], std_results['stp_x'], std_results['stp_u'],
             neuron_idx=std_results.get('stim_neuron', 45),
-            ax=ax2, title='B. STD Dynamics'
+            ax=ax_B, title='B. STD Dynamics'
         )
     
     # C: Adjustment error
-    ax3 = fig.add_subplot(gs[0, 2])
+    ax_C = fig.add_subplot(outer_gs[0, 2])
     plot_adjustment_error(
         std_results['delta'], std_results['errors'],
-        ax=ax3, title='C. STD Adjustment Error (Repulsion)',
+        ax=ax_C, title='C. STD Adjustment Error (Repulsion)',
         color='#E74C3C'
     )
     
-    # Row 2: STF-dominated (D-F)
-    # D: Neural activity
-    ax4 = fig.add_subplot(gs[1, 0])
+    # ========== Row 1: STF-dominated (D-F) ==========
+    
+    # D: Nested GridSpec for two vertically stacked subplots (neural activity + STP u)
+    gs_D = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer_gs[1, 0], hspace=0.5)
+    
+    # D-upper: Neural activity heatmap
+    ax_D_upper = fig.add_subplot(gs_D[0])
     if 'activity' in stf_results:
         plot_neural_activity(
             stf_results['time'], stf_results['activity'],
-            stf_results['theta'], ax=ax4, title='D. STF Neural Activity'
+            stf_results['theta'], ax=ax_D_upper, title='D1. STF Neural Activity'
         )
     
-    # E: STP dynamics
-    ax5 = fig.add_subplot(gs[1, 1])
+    # D-lower: STP u heatmap (all neurons)
+    ax_D_lower = fig.add_subplot(gs_D[1])
+    if 'stp_u' in stf_results:
+        plot_stp_all_neurons(
+            stf_results['time'], stf_results['stp_u'],
+            stf_results['theta'], var_name='u (release prob.)',
+            ax=ax_D_lower, title='D2. STF STP u', cmap='cool'
+        )
+    
+    # E: STP dynamics (single neuron)
+    ax_E = fig.add_subplot(outer_gs[1, 1])
     if 'stp_x' in stf_results:
         plot_stp_dynamics(
             stf_results['time'], stf_results['stp_x'], stf_results['stp_u'],
             neuron_idx=stf_results.get('stim_neuron', 45),
-            ax=ax5, title='E. STF Dynamics'
+            ax=ax_E, title='E. STF Dynamics'
         )
     
     # F: Adjustment error
-    ax6 = fig.add_subplot(gs[1, 2])
+    ax_F = fig.add_subplot(outer_gs[1, 2])
     plot_adjustment_error(
         stf_results['delta'], stf_results['errors'],
-        ax=ax6, title='F. STF Adjustment Error (Attraction)',
+        ax=ax_F, title='F. STF Adjustment Error (Attraction)',
         color='#3498DB'
     )
     
@@ -643,97 +676,3 @@ def plot_stp_all_neurons(
     return ax
 
 
-def plot_fig2_single_layer_v2(
-    std_results: dict,
-    stf_results: dict,
-    figsize: Tuple[int, int] = (16, 12),
-    save_path: Optional[str] = None,
-) -> plt.Figure:
-    """Reproduce Figure 2: Single-layer CANN experiments (with STP heatmaps).
-    
-    Args:
-        std_results: Results from STD-dominated experiment
-        stf_results: Results from STF-dominated experiment
-        figsize: Figure size
-        save_path: Path to save figure
-        
-    Returns:
-        Matplotlib figure
-    """
-    fig = plt.figure(figsize=figsize)
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.4)
-    
-    # Row 1: STD-dominated (A-C)
-    # A: Neural activity
-    ax1 = fig.add_subplot(gs[0, 0])
-    if 'activity' in std_results:
-        plot_neural_activity(
-            std_results['time'], std_results['activity'], 
-            std_results['theta'], ax=ax1, title='A. STD Neural Activity'
-        )
-    
-    # A2: STP x (all neurons)
-    ax1b = fig.add_subplot(gs[0, 1])
-    if 'stp_x' in std_results:
-        plot_stp_all_neurons(
-            std_results['time'], std_results['stp_x'],
-            std_results['theta'], var_name='x (availability)',
-            ax=ax1b, title='A2. STD STP x (All Neurons)', cmap='hot'
-        )
-    
-    # B: STP dynamics (single neuron)
-    ax2 = fig.add_subplot(gs[0, 2])
-    if 'stp_x' in std_results:
-        plot_stp_dynamics(
-            std_results['time'], std_results['stp_x'], std_results['stp_u'],
-            neuron_idx=std_results.get('stim_neuron', 45),
-            ax=ax2, title='B. STD Dynamics'
-        )
-    
-    # C: Adjustment error
-    ax3 = fig.add_subplot(gs[0, 2])
-    plot_adjustment_error(
-        std_results['delta'], std_results['errors'],
-        ax=ax3, title='C. STD Adjustment Error (Repulsion)',
-        color='#E74C3C'
-    )
-    
-    # Row 2: STF-dominated (D-F)
-    # D: Neural activity
-    ax4 = fig.add_subplot(gs[1, 0])
-    if 'activity' in stf_results:
-        plot_neural_activity(
-            stf_results['time'], stf_results['activity'],
-            stf_results['theta'], ax=ax4, title='D. STF Neural Activity'
-        )
-    
-    # D2: STP u (all neurons)
-    ax4b = fig.add_subplot(gs[1, 1])
-    if 'stp_u' in stf_results:
-        plot_stp_all_neurons(
-            stf_results['time'], stf_results['stp_u'],
-            stf_results['theta'], var_name='u (release prob.)',
-            ax=ax4b, title='D2. STF STP u (All Neurons)', cmap='cool'
-        )
-    
-    # E: STP dynamics (single neuron)
-    ax5 = fig.add_subplot(gs[1, 1])
-    if 'stp_u' in stf_results:
-        plot_stp_dynamics(
-            stf_results['time'], stf_results['stp_x'], stf_results['stp_u'],
-            neuron_idx=stf_results.get('stim_neuron', 45),
-            ax=ax5, title='E. STF Dynamics'
-        )
-    
-    # F: Adjustment error
-    ax6 = fig.add_subplot(gs[1, 2])
-    plot_adjustment_error(
-        stf_results['delta'], stf_results['errors'],
-        ax=ax6, title='F. STF Adjustment Error (Attraction)',
-        color='#3498DB'
-    )
-    
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-    
-    return fig

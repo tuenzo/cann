@@ -1,0 +1,71 @@
+# CANN 项目上下文
+
+## 项目概述
+这是一个基于 JAX 实现的两层连续吸引子神经网络（CANN）模型项目，用于复现 Zhang et al. (NeurIPS 2025) 论文中关于视觉感知序列依赖现象的研究。
+
+## 核心概念
+- **序列依赖 (Serial Dependence)**: 近期感觉历史如何塑造当前感知
+- **排斥效应 (Repulsion)**: STD（短期抑制）主导时产生，当前感知被近期刺激排斥
+- **吸引效应 (Attraction)**: STF（短期增强）主导时产生，当前感知被近期刺激吸引
+
+## 项目结构
+```
+src/
+├── models/          # 神经网络模型
+│   ├── cann.py      # 单层CANN模型
+│   ├── stp.py       # 短期突触可塑性
+│   └── two_layer_cann.py  # 两层CANN模型
+├── experiments/     # 实验代码
+│   ├── single_layer_exp.py
+│   ├── two_layer_exp.py
+│   ├── fast_single_layer.py
+│   └── fast_single_layer_optimized.py
+├── decoding/        # 解码器
+│   └── decoders.py
+├── visualization/   # 可视化
+│   └── plots.py
+└── analysis/        # 分析工具
+    └── dog_fitting.py
+
+scripts/             # 运行脚本
+├── run_fig2.py      # Figure 2 实验
+├── run_fig3.py      # Figure 3 实验
+├── run_fig4.py      # Figure 4 实验
+└── run_all.py       # 运行所有实验
+
+configs/
+└── params.py        # 参数配置
+```
+
+## 关键参数
+- **STD主导**: τ_d=3.0s, τ_f=0.3s → 排斥效应
+- **STF主导**: τ_d=0.3s, τ_f=5.0s → 吸引效应
+- **神经元数量**: N=180（覆盖180°朝向空间）
+
+## 当前进度
+<!-- 在这里记录项目当前的工作进度 -->
+- [x] 基础模型实现
+- [x] 单层CANN实验
+- [x] 两层CANN实验
+- [x] 可视化模块
+- [x] 代码合并优化（2026-01-07）
+
+## 最近的工作
+<!-- 每次任务结束时更新这里 -->
+- 日期: 2026-01-07
+- 内容: 代码合并优化
+  - 将 `run_trial_with_recording` 和 `run_fast_experiment_with_recording` 合并到 `fast_single_layer_optimized.py`
+  - 废弃 `fast_single_layer.py`（添加 deprecation warning）
+  - 更新 `scripts/run_fig2.py` 的导入路径
+
+## 已知问题
+<!-- 记录已知的bug或待解决问题 -->
+
+## 开发笔记
+<!-- 记录重要的开发决策或注意事项 -->
+- 使用 JAX 进行  加速
+- 使用 FFT 实现高效的环形卷积
+- 使用 jax.vmap 进行批量实验
+
+---
+**注意**: 此文件用于帮助 AI 助手在每次对话中快速了解项目上下文。请在重要更改后更新此文件。

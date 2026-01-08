@@ -1,9 +1,29 @@
 """
-Fast Single-Layer CANN Experiments using JAX vectorization
-============================================================
+[DEPRECATED] Fast Single-Layer CANN Experiments using JAX vectorization
+========================================================================
 
-使用 jax.lax.scan 实现向量化时间演化，大幅提升计算速度。
+⚠️ 此模块已废弃！请使用 fast_single_layer_optimized.py 代替。
+
+废弃原因：
+- 功能已合并到 fast_single_layer_optimized.py
+- fast_single_layer_optimized.py 使用 jax.vmap 提供更好的性能
+
+迁移指南：
+- run_fast_experiment() -> run_fast_experiment_optimized()
+- run_fast_experiment_with_recording() -> 同名函数已移至 fast_single_layer_optimized.py
+- run_trial_with_recording() -> 同名函数已移至 fast_single_layer_optimized.py
+
+此文件将在未来版本中删除。
 """
+
+import warnings
+
+warnings.warn(
+    "fast_single_layer.py 已废弃，请使用 fast_single_layer_optimized.py。"
+    "此模块将在未来版本中删除。",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 from typing import Optional, Dict, Tuple, NamedTuple
 from functools import partial

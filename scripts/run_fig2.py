@@ -27,15 +27,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np
 import matplotlib.pyplot as plt
 
-from src.experiments.fast_single_layer import (
-    run_fast_experiment_with_recording,
-)
 from src.experiments.fast_single_layer_optimized import (
     run_fast_experiment_optimized,
+    run_fast_experiment_with_recording,
 )
 from src.visualization.plots import (
     setup_figure_style,
-    plot_fig2_single_layer_v2,
+    plot_fig2_single_layer,
     plot_neural_activity,
     plot_stp_dynamics,
     plot_adjustment_error,
@@ -207,7 +205,7 @@ def main():
     }
     
     # Main figure
-    fig = plot_fig2_single_layer_v2(
+    fig = plot_fig2_single_layer(
         std_plot_data, stf_plot_data,
         save_path=output_dir / 'fig2_complete.png'
     )
@@ -282,7 +280,7 @@ def main():
     print(f"  Saved: {output_dir / 'fig2f_stf_error.png'}")
     plt.close(fig_f)
     
-    # Save numerical results
+    # Save numerical results (error curves only - small file)
     np.savez(
         output_dir / 'fig2_data.npz',
         std_delta=std_results['curve_binned']['delta'],
@@ -293,6 +291,33 @@ def main():
         stf_errors_se=stf_results['curve_binned']['se_error'],
     )
     print(f"  Saved: {output_dir / 'fig2_data.npz'}")
+    
+    # Save complete data including timeseries (for regenerating figures)
+    np.savez(
+        output_dir / 'fig2_complete_data.npz',
+        # Error curves
+        std_delta=std_results['curve_binned']['delta'],
+        std_errors=std_results['curve_binned']['mean_error'],
+        std_errors_se=std_results['curve_binned']['se_error'],
+        stf_delta=stf_results['curve_binned']['delta'],
+        stf_errors=stf_results['curve_binned']['mean_error'],
+        stf_errors_se=stf_results['curve_binned']['se_error'],
+        # STD timeseries
+        std_time=std_recording['timeseries']['time'],
+        std_activity=std_recording['timeseries']['r'],
+        std_stp_x=std_recording['timeseries']['stp_x'],
+        std_stp_u=std_recording['timeseries']['stp_u'],
+        std_theta=std_recording['theta'],
+        std_stim_neuron=std_recording['s1_neuron'],
+        # STF timeseries
+        stf_time=stf_recording['timeseries']['time'],
+        stf_activity=stf_recording['timeseries']['r'],
+        stf_stp_x=stf_recording['timeseries']['stp_x'],
+        stf_stp_u=stf_recording['timeseries']['stp_u'],
+        stf_theta=stf_recording['theta'],
+        stf_stim_neuron=stf_recording['s1_neuron'],
+    )
+    print(f"  Saved: {output_dir / 'fig2_complete_data.npz'}")
     
     # Summary
     total_time = time.time() - total_start

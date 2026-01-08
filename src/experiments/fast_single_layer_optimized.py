@@ -1,10 +1,18 @@
 """
-Multi-Core Optimized Fast Single-Layer CANN Experiments (JAX vmap Version)
-==========================================================================
+Fast Single-Layer CANN Experiments (JAX Optimized Version)
+==========================================================
 
-使用 jax.vmap 实现批量并行加速：
+统一的单层CANN实验模块，包含：
+- jax.vmap 批量并行加速（用于大规模实验）
+- 单次试验记录功能（用于可视化）
+
+优化策略：
 - jax.vmap: 向量化 trials 层（批量并行，利用 CPU SIMD）
-预期速度提升: 5-15x（取决于 batch size 和 CPU 架构）
+- jax.lax.scan: 向量化时间演化
+
+预期速度提升: 200-300x（相比原始 Python 循环版本）
+
+注意：此模块合并了原 fast_single_layer.py 的功能。
 """
 
 from typing import Optional, Dict, Tuple, NamedTuple, List
@@ -431,3 +439,229 @@ def run_fast_experiment_optimized(
             'r_squared': dog_params.r_squared,
         },
     }
+
+
+# =============================================================================
+# Single Trial with Recording (for visualization)
+# =============================================================================
+
+def run_trial_with_recording(
+    theta_s1: float,
+    theta_s2: float,
+    kernel: jnp.ndarray,
+    params: CANNParamsNumeric,
+    trial_config: TrialConfig,
+) -> Dict:
+    """Run a single trial and record neural activity for visualization.
+    
+    This function is used to generate Fig.2A/D (activity heatmaps) and
+    Fig.2B/E (STP dynamics).
+    
+    Args:
+        theta_s1: First stimulus orientation (degrees)
+        theta_s2: Second stimulus orientation (degrees)
+        kernel: Connection kernel
+        params: Numeric CANN parameters
+        trial_config: Trial timing configuration
+        
+    Returns:
+        Dictionary with timeseries and results
+    """
+    N = trial_config.N
+    dt = trial_config.dt
+    
+    # Compute step counts
+    n_s1 = int(trial_config.s1_duration / dt)
+    n_isi = int(trial_config.isi / dt)
+    n_s2 = int(trial_config.s2_duration / dt)
+    n_delay = int(trial_config.delay / dt)
+    n_cue = int(trial_config.cue_duration / dt)
+    
+    # Initialize state
+    state = CANNState(
+        u=jnp.zeros(N),
+        r=jnp.zeros(N),
+        stp=STPState(
+            x=jnp.ones(N) * 1.0,
+            u=jnp.ones(N) * params.U,
+        ),
+    )
+    
+    # Create theta array
+    theta = jnp.linspace(-90, 90, N, endpoint=False)
+    
+    # Create stimuli
+    def make_stimulus(theta_stim, amplitude, width):
+        dx = theta - theta_stim
+        dx = jnp.where(dx > 90, dx - 180, dx)
+        dx = jnp.where(dx < -90, dx + 180, dx)
+        return amplitude * jnp.exp(-dx**2 / (2 * width**2))
+    
+    I_s1 = make_stimulus(theta_s1, trial_config.alpha_sti,
+                         trial_config.a_sti * 180 / jnp.pi)
+    I_s2 = make_stimulus(theta_s2, trial_config.alpha_sti,
+                         trial_config.a_sti * 180 / jnp.pi)
+    I_cue = make_stimulus(0.0, trial_config.alpha_cue,
+                          trial_config.a_cue * 180 / jnp.pi)
+    I_zero = jnp.zeros(N)
+    
+    # Extract scalar parameters
+    tau, k, rho = params.tau, params.k, params.rho
+    dt_val = params.dt
+    tau_d, tau_f, U = params.tau_d, params.tau_f, params.U
+    
+    # Recording lists
+    all_time = []
+    all_r = []
+    all_stp_x = []
+    all_stp_u = []
+    
+    t = 0.0
+    
+    # Phase 1: S1 presentation
+    for _ in range(n_s1):
+        state = cann_step_fast(state, I_s1, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        t += dt
+        all_time.append(t)
+        all_r.append(np.array(state.r))
+        all_stp_x.append(np.array(state.stp.x))
+        all_stp_u.append(np.array(state.stp.u))
+    
+    # Phase 2: ISI
+    for i in range(n_isi):
+        state = cann_step_fast(state, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        t += dt
+        all_time.append(t)
+        all_r.append(np.array(state.r))
+        all_stp_x.append(np.array(state.stp.x))
+        all_stp_u.append(np.array(state.stp.u))
+    
+    # Phase 3: S2 presentation
+    for _ in range(n_s2):
+        state = cann_step_fast(state, I_s2, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        t += dt
+        all_time.append(t)
+        all_r.append(np.array(state.r))
+        all_stp_x.append(np.array(state.stp.x))
+        all_stp_u.append(np.array(state.stp.u))
+    
+    # Phase 4: Delay
+    for i in range(n_delay):
+        state = cann_step_fast(state, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        t += dt
+        if i % 10 == 0:  # Record every 10 steps for efficiency
+            all_time.append(t)
+            all_r.append(np.array(state.r))
+            all_stp_x.append(np.array(state.stp.x))
+            all_stp_u.append(np.array(state.stp.u))
+    
+    # Phase 5: Cue - collect activity for decoding
+    cue_activity = []
+    for _ in range(n_cue):
+        state = cann_step_fast(state, I_cue, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        t += dt
+        cue_activity.append(np.array(state.r))
+        all_time.append(t)
+        all_r.append(np.array(state.r))
+        all_stp_x.append(np.array(state.stp.x))
+        all_stp_u.append(np.array(state.stp.u))
+    
+    # Decode: average activity during cue period
+    mean_activity = np.mean(cue_activity, axis=0)
+    
+    # Population vector decode
+    theta_np = np.array(theta)
+    theta_rad = theta_np * np.pi / 180
+    cos_sum = np.sum(mean_activity * np.cos(2 * theta_rad))
+    sin_sum = np.sum(mean_activity * np.sin(2 * theta_rad))
+    perceived_rad = np.arctan2(sin_sum, cos_sum) / 2
+    perceived = perceived_rad * 180 / np.pi
+    
+    # Wrap to [-90, 90)
+    if perceived >= 90:
+        perceived -= 180
+    elif perceived < -90:
+        perceived += 180
+    
+    # Compute error
+    error = perceived - theta_s2
+    if error > 90:
+        error -= 180
+    elif error < -90:
+        error += 180
+    
+    # Find neuron index closest to S1
+    s1_neuron = int(np.argmin(np.abs(theta_np - theta_s1)))
+    s2_neuron = int(np.argmin(np.abs(theta_np - theta_s2)))
+    
+    return {
+        'timeseries': {
+            'time': np.array(all_time),
+            'r': np.array(all_r),
+            'stp_x': np.array(all_stp_x),
+            'stp_u': np.array(all_stp_u),
+        },
+        'theta': theta_np,
+        'theta_s1': theta_s1,
+        'theta_s2': theta_s2,
+        's1_neuron': s1_neuron,
+        's2_neuron': s2_neuron,
+        'perceived': perceived,
+        'error': error,
+        'delta': theta_s1 - theta_s2,
+    }
+
+
+def run_fast_experiment_with_recording(
+    stp_type: str = 'std',
+    delta_to_record: float = -30.0,
+    isi: float = 1000.0,
+) -> Dict:
+    """Run a single trial with recording for visualization.
+    
+    This is the main entry point for generating visualization data
+    (Fig.2A/D activity heatmaps, Fig.2B/E STP dynamics).
+    
+    Args:
+        stp_type: 'std' for STD-dominated, 'stf' for STF-dominated
+        delta_to_record: Delta value for the recorded trial (degrees)
+        isi: Inter-stimulus interval in ms
+        
+    Returns:
+        Dictionary with timeseries and results
+    """
+    # Set parameters based on STP type (Table 1)
+    if stp_type == 'std':
+        params = CANNParamsNumeric(
+            N=100, J0=0.13, a=0.5, tau=10.0, k=0.0018, rho=1.0, dt=0.1,
+            tau_d=3.0, tau_f=0.3, U=0.5,
+        )
+    else:  # stf
+        params = CANNParamsNumeric(
+            N=100, J0=0.09, a=0.15, tau=10.0, k=0.0095, rho=1.0, dt=0.1,
+            tau_d=0.3, tau_f=5.0, U=0.2,
+        )
+    
+    trial_config = TrialConfig(
+        N=params.N, dt=params.dt,
+        isi=isi,
+    )
+    
+    # Create kernel
+    kernel = create_gaussian_kernel(
+        params.N, params.a, params.J0, 'centered'
+    )
+    
+    # Stimulus orientations
+    theta_s2 = 0.0  # Reference
+    theta_s1 = theta_s2 + delta_to_record
+    
+    # Wrap
+    if theta_s1 >= 90:
+        theta_s1 -= 180
+    elif theta_s1 < -90:
+        theta_s1 += 180
+    
+    return run_trial_with_recording(
+        theta_s1, theta_s2, kernel, params, trial_config
+    )
