@@ -49,6 +49,8 @@ def plot_neural_activity(
     title: str = "Neural Activity",
     cmap: str = 'hot',
     vmax: Optional[float] = None,
+    interpolate: bool = False,
+    target_length: Optional[int] = None,
 ) -> plt.Axes:
     """Plot neural activity heatmap over time.
     
@@ -60,12 +62,28 @@ def plot_neural_activity(
         title: Plot title
         cmap: Colormap name
         vmax: Maximum value for colormap
+        interpolate: Whether to interpolate time series (default: False)
+        target_length: Target number of time points (default: None, use original)
         
     Returns:
         Matplotlib axes
     """
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 4))
+    
+    # 插值扩充（如果启用）
+    if interpolate and target_length is not None and len(time) < target_length:
+        # 创建新的时间网格（更密集）
+        time_dense = np.linspace(time[0], time[-1], target_length)
+        
+        # 对每个神经元的活动进行插值
+        activity_dense = np.zeros((target_length, activity.shape[1]))
+        for i in range(activity.shape[1]):
+            activity_dense[:, i] = np.interp(time_dense, time, activity[:, i])
+        
+        # 使用插值后的数据
+        time = time_dense
+        activity = activity_dense
     
     if vmax is None:
         vmax = np.max(activity)
@@ -96,6 +114,8 @@ def plot_stp_dynamics(
     neuron_idx: int,
     ax: Optional[plt.Axes] = None,
     title: str = "STP Dynamics",
+    interpolate: bool = False,
+    target_length: Optional[int] = None,
 ) -> plt.Axes:
     """Plot STP variables over time for a single neuron.
     
@@ -106,6 +126,8 @@ def plot_stp_dynamics(
         neuron_idx: Index of neuron to plot
         ax: Matplotlib axes
         title: Plot title
+        interpolate: Whether to interpolate time series (default: False)
+        target_length: Target number of time points (default: None, use original)
         
     Returns:
         Matplotlib axes
@@ -113,9 +135,26 @@ def plot_stp_dynamics(
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 3))
     
-    ax.plot(time, stp_x[:, neuron_idx], 'b-', label='x (availability)', linewidth=2)
-    ax.plot(time, stp_u[:, neuron_idx], 'r-', label='u (release prob.)', linewidth=2)
-    ax.plot(time, stp_x[:, neuron_idx] * stp_u[:, neuron_idx], 
+    # 插值扩充（如果启用）
+    if interpolate and target_length is not None and len(time) < target_length:
+        # 创建新的时间网格（更密集）
+        time_dense = np.linspace(time[0], time[-1], target_length)
+        
+        # 对单个神经元的 STP 变量进行插值
+        stp_x_interp = np.interp(time_dense, time, stp_x[:, neuron_idx])
+        stp_u_interp = np.interp(time_dense, time, stp_u[:, neuron_idx])
+        
+        # 使用插值后的数据
+        time = time_dense
+        x_data = stp_x_interp
+        u_data = stp_u_interp
+    else:
+        x_data = stp_x[:, neuron_idx]
+        u_data = stp_u[:, neuron_idx]
+    
+    ax.plot(time, x_data, 'b-', label='x (availability)', linewidth=2)
+    ax.plot(time, u_data, 'r-', label='u (release prob.)', linewidth=2)
+    ax.plot(time, x_data * u_data, 
             'g--', label='u·x (efficacy)', linewidth=2)
     
     ax.set_xlabel('Time (ms)')
@@ -287,10 +326,15 @@ def plot_temporal_window(
 def plot_fig2_single_layer(
     std_results: dict,
     stf_results: dict,
-    figsize: Tuple[int, int] = (14, 10),
+    figsize: Tuple[int, int] = (16, 14),
     save_path: Optional[str] = None,
 ) -> plt.Figure:
     """Reproduce Figure 2: Single-layer CANN experiments.
+    
+    Layout: 2 rows x 3 columns
+    - Column 0 (A/D): Two vertically stacked subplots (neural activity + STP heatmap)
+    - Column 1 (B/E): STP dynamics (single neuron)
+    - Column 2 (C/F): Adjustment error curves
     
     Args:
         std_results: Results from STD-dominated experiment
@@ -302,57 +346,85 @@ def plot_fig2_single_layer(
         Matplotlib figure
     """
     fig = plt.figure(figsize=figsize)
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.3, wspace=0.3)
     
-    # Row 1: STD-dominated (A-C)
-    # A: Neural activity
-    ax1 = fig.add_subplot(gs[0, 0])
+    # Create outer GridSpec: 2 rows x 3 columns
+    outer_gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.4, wspace=0.3)
+    
+    # ========== Row 0: STD-dominated (A-C) ==========
+    
+    # A: Nested GridSpec for two vertically stacked subplots (neural activity + STP x)
+    gs_A = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer_gs[0, 0], hspace=0.5)
+    
+    # A-upper: Neural activity heatmap
+    ax_A_upper = fig.add_subplot(gs_A[0])
     if 'activity' in std_results:
         plot_neural_activity(
-            std_results['time'], std_results['activity'], 
-            std_results['theta'], ax=ax1, title='A. STD Neural Activity'
+            std_results['time'], std_results['activity'],
+            std_results['theta'], ax=ax_A_upper, title='A1. STD Neural Activity'
         )
     
-    # B: STP dynamics
-    ax2 = fig.add_subplot(gs[0, 1])
+    # A-lower: STP x heatmap (all neurons)
+    ax_A_lower = fig.add_subplot(gs_A[1])
+    if 'stp_x' in std_results:
+        plot_stp_all_neurons(
+            std_results['time'], std_results['stp_x'],
+            std_results['theta'], var_name='x (availability)',
+            ax=ax_A_lower, title='A2. STD STP x', cmap='hot'
+        )
+    
+    # B: STP dynamics (single neuron)
+    ax_B = fig.add_subplot(outer_gs[0, 1])
     if 'stp_x' in std_results:
         plot_stp_dynamics(
             std_results['time'], std_results['stp_x'], std_results['stp_u'],
             neuron_idx=std_results.get('stim_neuron', 45),
-            ax=ax2, title='B. STD Dynamics'
+            ax=ax_B, title='B. STD Dynamics'
         )
     
     # C: Adjustment error
-    ax3 = fig.add_subplot(gs[0, 2])
+    ax_C = fig.add_subplot(outer_gs[0, 2])
     plot_adjustment_error(
         std_results['delta'], std_results['errors'],
-        ax=ax3, title='C. STD Adjustment Error (Repulsion)',
+        ax=ax_C, title='C. STD Adjustment Error (Repulsion)',
         color='#E74C3C'
     )
     
-    # Row 2: STF-dominated (D-F)
-    # D: Neural activity
-    ax4 = fig.add_subplot(gs[1, 0])
+    # ========== Row 1: STF-dominated (D-F) ==========
+    
+    # D: Nested GridSpec for two vertically stacked subplots (neural activity + STP u)
+    gs_D = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=outer_gs[1, 0], hspace=0.5)
+    
+    # D-upper: Neural activity heatmap
+    ax_D_upper = fig.add_subplot(gs_D[0])
     if 'activity' in stf_results:
         plot_neural_activity(
             stf_results['time'], stf_results['activity'],
-            stf_results['theta'], ax=ax4, title='D. STF Neural Activity'
+            stf_results['theta'], ax=ax_D_upper, title='D1. STF Neural Activity'
         )
     
-    # E: STP dynamics
-    ax5 = fig.add_subplot(gs[1, 1])
+    # D-lower: STP u heatmap (all neurons)
+    ax_D_lower = fig.add_subplot(gs_D[1])
+    if 'stp_u' in stf_results:
+        plot_stp_all_neurons(
+            stf_results['time'], stf_results['stp_u'],
+            stf_results['theta'], var_name='u (release prob.)',
+            ax=ax_D_lower, title='D2. STF STP u', cmap='cool'
+        )
+    
+    # E: STP dynamics (single neuron)
+    ax_E = fig.add_subplot(outer_gs[1, 1])
     if 'stp_x' in stf_results:
         plot_stp_dynamics(
             stf_results['time'], stf_results['stp_x'], stf_results['stp_u'],
             neuron_idx=stf_results.get('stim_neuron', 45),
-            ax=ax5, title='E. STF Dynamics'
+            ax=ax_E, title='E. STF Dynamics'
         )
     
     # F: Adjustment error
-    ax6 = fig.add_subplot(gs[1, 2])
+    ax_F = fig.add_subplot(outer_gs[1, 2])
     plot_adjustment_error(
         stf_results['delta'], stf_results['errors'],
-        ax=ax6, title='F. STF Adjustment Error (Attraction)',
+        ax=ax_F, title='F. STF Adjustment Error (Attraction)',
         color='#3498DB'
     )
     
@@ -538,4 +610,69 @@ def create_summary_figure(
         plt.savefig(save_path, bbox_inches='tight')
     
     return fig
+
+
+
+def plot_stp_all_neurons(
+    time: np.ndarray,
+    stp_var: np.ndarray,
+    theta: np.ndarray,
+    var_name: str = 'x (availability)',
+    ax: Optional[plt.Axes] = None,
+    title: str = "STP Dynamics (All Neurons)",
+    cmap: str = 'viridis',
+    interpolate: bool = False,
+    target_length: Optional[int] = None,
+) -> plt.Axes:
+    """Plot STP variable for ALL neurons over time (heatmap).
+    
+    Args:
+        time: Time points (ms), shape (T,)
+        stp_var: STP variable array, shape (T, N)
+        theta: Preferred orientations (degrees), shape (N,)
+        var_name: Variable name for title and colorbar
+        ax: Matplotlib axes
+        title: Plot title
+        cmap: Colormap name
+        interpolate: Whether to interpolate time series (default: False)
+        target_length: Target number of time points (default: None, use original)
+        
+    Returns:
+        Matplotlib axes
+    """
+    if ax is None:
+        _, ax = plt.subplots(figsize=(10, 4))
+    
+    # 插值扩充（如果启用）
+    if interpolate and target_length is not None and len(time) < target_length:
+        # 创建新的时间网格（更密集）
+        time_dense = np.linspace(time[0], time[-1], target_length)
+        
+        # 对每个神经元的 STP 变量进行插值
+        stp_var_dense = np.zeros((target_length, stp_var.shape[1]))
+        for i in range(stp_var.shape[1]):
+            stp_var_dense[:, i] = np.interp(time_dense, time, stp_var[:, i])
+        
+        # 使用插值后的数据
+        time = time_dense
+        stp_var = stp_var_dense
+    
+    im = ax.imshow(
+        stp_var.T,
+        aspect='auto',
+        origin='lower',
+        extent=[time[0], time[-1], theta[0], theta[-1]],
+        cmap=cmap,
+        vmin=np.min(stp_var),
+        vmax=np.max(stp_var),
+    )
+    
+    plt.colorbar(im, ax=ax, label=var_name)
+    
+    ax.set_xlabel('Time (ms)')
+    ax.set_ylabel('Preferred Orientation (°)')
+    ax.set_title(title)
+    
+    return ax
+
 

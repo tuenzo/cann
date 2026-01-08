@@ -1,48 +1,41 @@
 """
-[DEPRECATED] Fast Single-Layer CANN Experiments using JAX vectorization
-========================================================================
+Fast Single-Layer CANN Experiments (JAX Optimized Version)
+==========================================================
 
-⚠️ 此模块已废弃！请使用 fast_single_layer_optimized.py 代替。
+统一的单层CANN实验模块，包含：
+- jax.vmap 批量并行加速（用于大规模实验）
+- 单次试验记录功能（用于可视化）
 
-废弃原因：
-- 功能已合并到 fast_single_layer_optimized.py
-- fast_single_layer_optimized.py 使用 jax.vmap 提供更好的性能
+优化策略：
+- jax.vmap: 向量化 trials 层（批量并行，利用 CPU SIMD）
+- jax.lax.scan: 向量化时间演化
 
-迁移指南：
-- run_fast_experiment() -> run_fast_experiment_optimized()
-- run_fast_experiment_with_recording() -> 同名函数已移至 fast_single_layer_optimized.py
-- run_trial_with_recording() -> 同名函数已移至 fast_single_layer_optimized.py
+预期速度提升: 200-300x（相比原始 Python 循环版本）
 
-此文件将在未来版本中删除。
+注意：此模块合并了原 fast_single_layer.py 的功能。
 """
 
-import warnings
-
-warnings.warn(
-    "fast_single_layer.py 已废弃，请使用 fast_single_layer_optimized.py。"
-    "此模块将在未来版本中删除。",
-    DeprecationWarning,
-    stacklevel=2
-)
-
-from typing import Optional, Dict, Tuple, NamedTuple
+from typing import Optional, Dict, Tuple, NamedTuple, List
 from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
 from tqdm import tqdm
+import time
 
 from ..models.cann import (
-    CANNParams, CANNState,
+    CANNState,
     create_gaussian_kernel, create_stp_state,
-    cann_step, create_stimulus,
 )
 from ..models.stp import STPState
 from ..decoding import decode_orientation
 
 
 class TrialConfig(NamedTuple):
-    """Trial configuration for fast simulation."""
+    """Trial configuration for fast simulation.
+    
+    All parameters from Table 1 and paper requirements.
+    """
     N: int = 100
     dt: float = 0.1
     s1_duration: float = 200.0
@@ -50,47 +43,32 @@ class TrialConfig(NamedTuple):
     s2_duration: float = 200.0
     delay: float = 3400.0
     cue_duration: float = 500.0
-    # Stimulus parameters
-    alpha_ext: float = 20.0
-    a_ext: float = 0.3  # radians
-    # Cue parameters
-    alpha_cue: float = 2.5
-    a_cue: float = 0.4  # radians
-
-
-@partial(jax.jit, static_argnums=(2, 3))
-def run_phase(state: CANNState, I_ext: jnp.ndarray, n_steps: int, 
-              kernel: jnp.ndarray, params: CANNParams) -> CANNState:
-    """Run a single phase using jax.lax.fori_loop.
-    
-    Args:
-        state: Initial CANN state
-        I_ext: External input (constant for the phase)
-        n_steps: Number of time steps
-        kernel: Connection kernel
-        params: CANN parameters
-        
-    Returns:
-        Final state after n_steps
-    """
-    def body_fn(i, state):
-        return cann_step(state, I_ext, kernel, params)
-    
-    return jax.lax.fori_loop(0, n_steps, body_fn, state)
+    # Stimulus parameters (External Input, Table 1)
+    alpha_sti: float = 20.0        # Strength of external stimulus
+    a_sti: float = 0.3               # Spatial scale of external stimulus (radians)
+    mu_sti: float = 0.5               # Noise strength of external stimulus
+    # Cue parameters (External Input, Table 1)
+    alpha_cue: float = 2.5        # Strength of external cue
+    a_cue: float = 0.4               # Spatial scale of external cue (radians)
+    mu_cue: float = 1.0               # Noise strength of external cue
 
 
 class CANNParamsNumeric(NamedTuple):
-    """Numeric-only CANN parameters for JIT compilation."""
+    """Numeric-only CANN parameters for JIT compilation.
+    
+    Note: These are default values (STD-dominated).
+    For STF-dominated, these will be overridden in run_fast_experiment_optimized.
+    """
     N: int = 100
-    J0: float = 0.5
-    a: float = 30.0
-    tau: float = 1.0
-    k: float = 0.5
+    J0: float = 0.13                  # STD: 0.13, STF: 0.09
+    a: float = 0.5                     # STD: 0.5, STF: 0.15 (radians)
+    tau: float = 10.0                  # Time constant (ms), 0.01s = 10ms
+    k: float = 0.0018                  # STD: 0.0018, STF: 0.0095
     rho: float = 1.0
-    dt: float = 0.1
-    tau_d: float = 3.0
-    tau_f: float = 0.3
-    U: float = 0.3
+    dt: float = 0.1                     # Time step (ms)
+    tau_d: float = 3.0                  # STD: 3.0, STF: 0.3 (s)
+    tau_f: float = 0.3                  # STD: 0.3, STF: 5.0 (s)
+    U: float = 0.5                      # STD: 0.5, STF: 0.2
 
 
 def cann_step_fast(
@@ -149,30 +127,28 @@ def cann_step_fast(
     return CANNState(u=u_new, r=r_new, stp=stp_new)
 
 
-def run_trial_fast(
-    theta_s1: float,
-    theta_s2: float,
+def run_trial_vectorized(
+    theta_s1_batch: jnp.ndarray,
+    theta_s2_batch: jnp.ndarray,
     kernel: jnp.ndarray,
     params: CANNParamsNumeric,
     trial_config: TrialConfig,
-) -> Tuple[float, float]:
-    """Run a single trial using JIT-compiled phases.
-    
-    This is much faster than the Python-loop version because
-    each phase is compiled as a single XLA operation.
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """Run multiple trials in parallel using jax.vmap.
     
     Args:
-        theta_s1: First stimulus orientation (degrees)
-        theta_s2: Second stimulus orientation (degrees)
+        theta_s1_batch: Array of first stimulus orientations [batch_size]
+        theta_s2_batch: Array of second stimulus orientations [batch_size]
         kernel: Connection kernel
         params: Numeric CANN parameters
         trial_config: Trial timing configuration
         
     Returns:
-        (perceived_angle, error)
+        (perceived_angles, errors) both of shape [batch_size]
     """
     N = trial_config.N
     dt = trial_config.dt
+    batch_size = theta_s1_batch.shape[0]
     
     # Compute step counts
     n_s1 = int(trial_config.s1_duration / dt)
@@ -181,69 +157,90 @@ def run_trial_fast(
     n_delay = int(trial_config.delay / dt)
     n_cue = int(trial_config.cue_duration / dt)
     
-    # Initialize state
-    state = CANNState(
-        u=jnp.zeros(N),
-        r=jnp.zeros(N),
-        stp=create_stp_state(N, params.U),
+    # Initialize batched states
+    initial_states = CANNState(
+        u=jnp.zeros((batch_size, N)),
+        r=jnp.zeros((batch_size, N)),
+        stp=STPState(
+            x=jnp.ones((batch_size, N)) * 1.0,  # Initial x = 1
+            u=jnp.ones((batch_size, N)) * params.U,  # Initial u = U
+        ),
     )
     
     # Create theta array
     theta = jnp.linspace(-90, 90, N, endpoint=False)
     
-    # Create stimuli
-    def make_stimulus(theta_stim, amplitude, width):
-        dx = theta - theta_stim
+    # Create batched stimuli function
+    def make_stimulus_batch(theta_stim_batch, amplitude, width):
+        # theta_stim_batch: [batch_size]
+        # theta: [N]
+        # Output: [batch_size, N]
+        dx = theta[None, :] - theta_stim_batch[:, None]
         dx = jnp.where(dx > 90, dx - 180, dx)
         dx = jnp.where(dx < -90, dx + 180, dx)
         return amplitude * jnp.exp(-dx**2 / (2 * width**2))
     
-    I_s1 = make_stimulus(theta_s1, trial_config.alpha_ext, 
-                         trial_config.a_ext * 180 / jnp.pi)
-    I_s2 = make_stimulus(theta_s2, trial_config.alpha_ext,
-                         trial_config.a_ext * 180 / jnp.pi)
-    I_cue = make_stimulus(0.0, trial_config.alpha_cue,
-                          trial_config.a_cue * 180 / jnp.pi)  # Cue at reference
-    I_zero = jnp.zeros(N)
+    I_s1_batch = make_stimulus_batch(
+        theta_s1_batch, trial_config.alpha_sti,
+        trial_config.a_sti * 180 / jnp.pi
+    )
+    I_s2_batch = make_stimulus_batch(
+        theta_s2_batch, trial_config.alpha_sti,
+        trial_config.a_sti * 180 / jnp.pi
+    )
+    I_cue = jnp.zeros((batch_size, N)) + trial_config.alpha_cue * jnp.exp(
+        -(theta[None, :])**2 / (2 * (trial_config.a_cue * 180 / jnp.pi)**2)
+    )
+    I_zero = jnp.zeros((batch_size, N))
     
     # Extract scalar parameters
     tau, k, rho = params.tau, params.k, params.rho
     dt_val = params.dt
     tau_d, tau_f, U = params.tau_d, params.tau_f, params.U
     
-    # Phase 1: S1 presentation
-    def s1_step(state, _):
-        return cann_step_fast(state, I_s1, kernel, tau, k, rho, dt_val, tau_d, tau_f, U), None
-    state, _ = jax.lax.scan(s1_step, state, None, length=n_s1)
+    # Vectorized phase functions using jax.vmap
+    def s1_step_batch(states, _):
+        # states: CANNState with batched arrays [batch_size, N]
+        new_states = jax.vmap(
+            cann_step_fast, in_axes=(0, 0, None, None, None, None, None, None, None, None)
+        )(states, I_s1_batch, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        return new_states, None
     
-    # Phase 2: ISI
-    def isi_step(state, _):
-        return cann_step_fast(state, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U), None
-    state, _ = jax.lax.scan(isi_step, state, None, length=n_isi)
+    def isi_step_batch(states, _):
+        new_states = jax.vmap(
+            cann_step_fast, in_axes=(0, 0, None, None, None, None, None, None, None, None)
+        )(states, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        return new_states, None
     
-    # Phase 3: S2 presentation
-    def s2_step(state, _):
-        return cann_step_fast(state, I_s2, kernel, tau, k, rho, dt_val, tau_d, tau_f, U), None
-    state, _ = jax.lax.scan(s2_step, state, None, length=n_s2)
+    def s2_step_batch(states, _):
+        new_states = jax.vmap(
+            cann_step_fast, in_axes=(0, 0, None, None, None, None, None, None, None, None)
+        )(states, I_s2_batch, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        return new_states, None
     
-    # Phase 4: Delay
-    def delay_step(state, _):
-        return cann_step_fast(state, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U), None
-    state, _ = jax.lax.scan(delay_step, state, None, length=n_delay)
+    def delay_step_batch(states, _):
+        new_states = jax.vmap(
+            cann_step_fast, in_axes=(0, 0, None, None, None, None, None, None, None, None)
+        )(states, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        return new_states, None
     
-    # Phase 5: Cue - collect activity for decoding
-    def cue_step(state, _):
-        new_state = cann_step_fast(state, I_cue, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
-        return new_state, new_state.r
-    state, cue_activity = jax.lax.scan(cue_step, state, None, length=n_cue)
+    def cue_step_batch(states, _):
+        new_states = jax.vmap(
+            cann_step_fast, in_axes=(0, 0, None, None, None, None, None, None, None, None)
+        )(states, I_cue, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
+        return new_states, None
     
-    # Decode: average activity during cue period
-    mean_activity = jnp.mean(cue_activity, axis=0)
+    # Run phases
+    state_s1, _ = jax.lax.scan(s1_step_batch, initial_states, None, length=n_s1)
+    state_isi, _ = jax.lax.scan(isi_step_batch, state_s1, None, length=n_isi)
+    state_s2, _ = jax.lax.scan(s2_step_batch, state_isi, None, length=n_s2)
+    state_delay, _ = jax.lax.scan(delay_step_batch, state_s2, None, length=n_delay)
+    state_final, _ = jax.lax.scan(cue_step_batch, state_delay, None, length=n_cue)
     
-    # Population vector decode
+    # Decode: population vector method
     theta_rad = theta * jnp.pi / 180
-    cos_sum = jnp.sum(mean_activity * jnp.cos(2 * theta_rad))
-    sin_sum = jnp.sum(mean_activity * jnp.sin(2 * theta_rad))
+    cos_sum = jnp.sum(state_final.r * jnp.cos(2 * theta_rad)[None, :], axis=1)
+    sin_sum = jnp.sum(state_final.r * jnp.sin(2 * theta_rad)[None, :], axis=1)
     perceived_rad = jnp.arctan2(sin_sum, cos_sum) / 2
     perceived = perceived_rad * 180 / jnp.pi
     
@@ -252,18 +249,18 @@ def run_trial_fast(
     perceived = jnp.where(perceived < -90, perceived + 180, perceived)
     
     # Compute error
-    error = perceived - theta_s2
+    error = perceived - theta_s2_batch
     error = jnp.where(error > 90, error - 180, error)
     error = jnp.where(error < -90, error + 180, error)
     
     return perceived, error
 
 
-# JIT compile the trial function
-_run_trial_jit = jax.jit(run_trial_fast, static_argnums=(4,))
+# JIT compile the vectorized trial function
+_run_trial_vectorized_jit = jax.jit(run_trial_vectorized, static_argnums=(3, 4))
 
 
-def run_fast_experiment(
+def run_fast_experiment_optimized(
     stp_type: str = 'std',
     n_runs: int = 20,
     n_trials_per_run: int = 100,
@@ -272,8 +269,13 @@ def run_fast_experiment(
     isi: float = 1000.0,
     seed: int = 42,
     verbose: bool = True,
+    batch_size: int = 10,
 ) -> Dict:
-    """Run fast single-layer experiment using JIT compilation.
+    """Run fast single-layer experiment with jax.vmap optimization.
+    
+    Optimization strategy:
+    - jax.vmap: Vectorize trials within a batch (SIMD parallelism)
+    - Process trials in batches to balance memory usage and speed
     
     Args:
         stp_type: 'std' for STD-dominated, 'stf' for STF-dominated
@@ -284,22 +286,24 @@ def run_fast_experiment(
         isi: Inter-stimulus interval in ms
         seed: Random seed
         verbose: Show progress bar
+        batch_size: Number of trials per batch for jax.vmap (tunable)
         
     Returns:
         Dictionary with experiment results
     """
-    import time
     start_time = time.time()
     
     # Set parameters based on STP type (Table 1)
     if stp_type == 'std':
+        # STD-dominated (Fig. 2A-C): Repulsion effect
         params = CANNParamsNumeric(
             N=100, J0=0.13, a=0.5, tau=10.0, k=0.0018, rho=1.0, dt=0.1,
             tau_d=3.0, tau_f=0.3, U=0.5,
         )
     else:  # stf
+        # STF-dominated (Fig. 2D-F): Attraction effect
         params = CANNParamsNumeric(
-            N=100, J0=0.06, a=0.4, tau=10.0, k=0.005, rho=1.0, dt=0.1,
+            N=100, J0=0.09, a=0.15, tau=10.0, k=0.0095, rho=1.0, dt=0.1,
             tau_d=0.3, tau_f=5.0, U=0.2,
         )
     
@@ -319,25 +323,27 @@ def run_fast_experiment(
     # Warm up JIT (first call compiles)
     if verbose:
         print(f"JIT 编译中...")
-    _ = _run_trial_jit(0.0, 0.0, kernel, params, trial_config)
+    _ = _run_trial_vectorized_jit(
+        jnp.array([0.0]), jnp.array([0.0]), kernel, params, trial_config
+    )
     
     if verbose:
+        print(f"使用 jax.vmap 批量并行 (batch_size={batch_size})")
         print(f"开始运行 {n_runs} runs × {n_trials_per_run} trials...")
     
-    # Run experiment
-    all_trials = []
+    # Prepare all trials
     np.random.seed(seed)
+    total_trials = n_runs * n_trials_per_run
     
-    iterator = range(n_runs)
-    if verbose:
-        iterator = tqdm(iterator, desc=f'{stp_type.upper()} Runs')
+    all_theta_s1 = []
+    all_theta_s2 = []
+    all_delta = []
+    all_run_ids = []
+    all_trial_ids = []
     
-    for run_id in iterator:
+    for run_id in range(n_runs):
         for trial_id in range(n_trials_per_run):
-            # Random delta
             delta = np.random.choice(deltas)
-            
-            # Stimulus orientations
             theta_s2 = 0.0  # Reference
             theta_s1 = theta_s2 + delta
             
@@ -347,19 +353,45 @@ def run_fast_experiment(
             elif theta_s1 < -90:
                 theta_s1 += 180
             
-            # Run trial
-            perceived, error = _run_trial_jit(
-                theta_s1, theta_s2, kernel, params, trial_config
-            )
-            
+            all_theta_s1.append(theta_s1)
+            all_theta_s2.append(theta_s2)
+            all_delta.append(delta)
+            all_run_ids.append(run_id)
+            all_trial_ids.append(trial_id)
+    
+    # Convert to arrays
+    all_theta_s1 = np.array(all_theta_s1)
+    all_theta_s2 = np.array(all_theta_s2)
+    
+    # Process in batches
+    all_trials = []
+    
+    iterator = range(0, total_trials, batch_size)
+    if verbose:
+        iterator = tqdm(iterator, desc='Processing batches')
+    
+    for i in iterator:
+        end_idx = min(i + batch_size, total_trials)
+        
+        theta_s1_batch = jnp.array(all_theta_s1[i:end_idx])
+        theta_s2_batch = jnp.array(all_theta_s2[i:end_idx])
+        
+        # Run batch
+        perceived_batch, error_batch = _run_trial_vectorized_jit(
+            theta_s1_batch, theta_s2_batch, kernel, params, trial_config
+        )
+        
+        # Collect results
+        for j in range(len(perceived_batch)):
+            idx = i + j
             all_trials.append({
-                'run_id': run_id,
-                'trial_id': trial_id,
-                'theta_s1': float(theta_s1),
-                'theta_s2': float(theta_s2),
-                'delta': float(delta),
-                'perceived': float(perceived),
-                'error': float(error),
+                'run_id': all_run_ids[idx],
+                'trial_id': all_trial_ids[idx],
+                'theta_s1': float(all_theta_s1[idx]),
+                'theta_s2': float(all_theta_s2[idx]),
+                'delta': float(all_delta[idx]),
+                'perceived': float(perceived_batch[j]),
+                'error': float(error_batch[j]),
             })
     
     elapsed = time.time() - start_time
@@ -409,6 +441,10 @@ def run_fast_experiment(
     }
 
 
+# =============================================================================
+# Single Trial with Recording (for visualization)
+# =============================================================================
+
 def run_trial_with_recording(
     theta_s1: float,
     theta_s2: float,
@@ -417,6 +453,9 @@ def run_trial_with_recording(
     trial_config: TrialConfig,
 ) -> Dict:
     """Run a single trial and record neural activity for visualization.
+    
+    This function is used to generate Fig.2A/D (activity heatmaps) and
+    Fig.2B/E (STP dynamics).
     
     Args:
         theta_s1: First stimulus orientation (degrees)
@@ -442,7 +481,10 @@ def run_trial_with_recording(
     state = CANNState(
         u=jnp.zeros(N),
         r=jnp.zeros(N),
-        stp=create_stp_state(N, params.U),
+        stp=STPState(
+            x=jnp.ones(N) * 1.0,
+            u=jnp.ones(N) * params.U,
+        ),
     )
     
     # Create theta array
@@ -455,10 +497,10 @@ def run_trial_with_recording(
         dx = jnp.where(dx < -90, dx + 180, dx)
         return amplitude * jnp.exp(-dx**2 / (2 * width**2))
     
-    I_s1 = make_stimulus(theta_s1, trial_config.alpha_ext, 
-                         trial_config.a_ext * 180 / jnp.pi)
-    I_s2 = make_stimulus(theta_s2, trial_config.alpha_ext,
-                         trial_config.a_ext * 180 / jnp.pi)
+    I_s1 = make_stimulus(theta_s1, trial_config.alpha_sti,
+                         trial_config.a_sti * 180 / jnp.pi)
+    I_s2 = make_stimulus(theta_s2, trial_config.alpha_sti,
+                         trial_config.a_sti * 180 / jnp.pi)
     I_cue = make_stimulus(0.0, trial_config.alpha_cue,
                           trial_config.a_cue * 180 / jnp.pi)
     I_zero = jnp.zeros(N)
@@ -507,11 +549,10 @@ def run_trial_with_recording(
     for i in range(n_delay):
         state = cann_step_fast(state, I_zero, kernel, tau, k, rho, dt_val, tau_d, tau_f, U)
         t += dt
-        if i % 10 == 0:  # Record every 10 steps
-            all_time.append(t)
-            all_r.append(np.array(state.r))
-            all_stp_x.append(np.array(state.stp.x))
-            all_stp_u.append(np.array(state.stp.u))
+        all_time.append(t)
+        all_r.append(np.array(state.r))
+        all_stp_x.append(np.array(state.stp.x))
+        all_stp_u.append(np.array(state.stp.u))
     
     # Phase 5: Cue - collect activity for decoding
     cue_activity = []
@@ -577,9 +618,12 @@ def run_fast_experiment_with_recording(
 ) -> Dict:
     """Run a single trial with recording for visualization.
     
+    This is the main entry point for generating visualization data
+    (Fig.2A/D activity heatmaps, Fig.2B/E STP dynamics).
+    
     Args:
         stp_type: 'std' for STD-dominated, 'stf' for STF-dominated
-        delta_to_record: Delta value for the recorded trial
+        delta_to_record: Delta value for the recorded trial (degrees)
         isi: Inter-stimulus interval in ms
         
     Returns:
@@ -593,7 +637,7 @@ def run_fast_experiment_with_recording(
         )
     else:  # stf
         params = CANNParamsNumeric(
-            N=100, J0=0.06, a=0.4, tau=10.0, k=0.005, rho=1.0, dt=0.1,
+            N=100, J0=0.09, a=0.15, tau=10.0, k=0.0095, rho=1.0, dt=0.1,
             tau_d=0.3, tau_f=5.0, U=0.2,
         )
     
@@ -620,4 +664,3 @@ def run_fast_experiment_with_recording(
     return run_trial_with_recording(
         theta_s1, theta_s2, kernel, params, trial_config
     )
-
