@@ -10,16 +10,24 @@ Includes:
 - STP dynamics plots
 - Adjustment error curves with DoG fits
 - Serial dependence analysis plots
+- Fig.2B/E: Response bump + STP spatial distribution (per paper requirements)
+
+Key Requirements for Fig.2B/E (from Appendix B, C):
+- Time structure: S1(200ms) -> ISI(1000ms) -> S2(200ms) -> Delay(3400ms) -> Cue(500ms)
+- Top panel: Neural response during cue period (retrieval response)
+- Bottom panel: STP spatial distribution at delay end (before cue)
+  - STD (Fig.2B): plot x(θ) - shows depletion near θ_s1
+  - STF (Fig.2E): plot u(θ) - shows facilitation near θ_s1
+- Analytical fit (gray dashed): Appendix C Eq.(15) for x, Eq.(17) for u
 """
 
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
-
-from ..analysis.dog_fitting import fit_dog, dog_function
+from ..analysis.dog_fitting import fit_dog, dog_function, fit_analytical_stp
 
 
 def setup_figure_style():
@@ -674,5 +682,152 @@ def plot_stp_all_neurons(
     ax.set_title(title)
     
     return ax
+
+
+# =============================================================================
+# Fig.2B/E: Response Bump + STP Spatial Distribution (Paper Requirements)
+# Note: fit_analytical_stp is imported from analysis.dog_fitting
+# =============================================================================
+
+def plot_fig2_panel_BE(
+    recording: Dict,
+    stp_type: str = 'std',
+    ax_top: Optional[plt.Axes] = None,
+    ax_bottom: Optional[plt.Axes] = None,
+    title_prefix: str = 'B',
+    figsize: Tuple[int, int] = (8, 6),
+    save_path: Optional[str] = None,
+) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
+    """Plot Fig.2B/E according to paper requirements.
+    
+    This function creates the correct Fig.2B/E panels as specified in the paper:
+    
+    Requirements (from Appendix B, C):
+    - Time structure: S1(200ms) -> ISI(1000ms) -> S2(200ms) -> Delay(3400ms) -> Cue(500ms)
+    - Top panel: Neural response r(θ) during cue period (retrieval response)
+    - Bottom panel: STP spatial distribution at delay end (t ≈ 4.5s, before cue)
+      - STD (Fig.2B): plot x(θ) - shows depletion near θ_s1
+      - STF (Fig.2E): plot u(θ) - shows facilitation near θ_s1
+    - Gray dashed line: Analytical fit from Appendix C Eq.(15)/(17)
+    
+    Args:
+        recording: Dictionary from run_fast_experiment_with_recording containing:
+            - timeseries: {'time', 'r', 'stp_x', 'stp_u'}
+            - theta: orientation array
+            - theta_s1, theta_s2: stimulus positions
+        stp_type: 'std' or 'stf'
+        ax_top: Axes for response bump (optional)
+        ax_bottom: Axes for STP distribution (optional)
+        title_prefix: 'B' for STD, 'E' for STF
+        figsize: Figure size if creating new figure
+        save_path: Path to save figure
+        
+    Returns:
+        (figure, (ax_top, ax_bottom))
+    """
+    # Extract data
+    time = recording['timeseries']['time']
+    r = recording['timeseries']['r']
+    stp_x = recording['timeseries']['stp_x']
+    stp_u = recording['timeseries']['stp_u']
+    theta = recording['theta']
+    theta_s1 = recording['theta_s1']
+    theta_s2 = recording['theta_s2']
+    
+    # Time structure (ms): S1=200, ISI=1000, S2=200, Delay=3400, Cue=500
+    # Total = 5300 ms
+    t_s1_end = 200.0
+    t_isi_end = t_s1_end + 1000.0  # 1200 ms
+    t_s2_end = t_isi_end + 200.0   # 1400 ms
+    t_delay_end = t_s2_end + 3400.0  # 4800 ms
+    t_cue_end = t_delay_end + 500.0  # 5300 ms
+    
+    # Find time indices
+    # Delay end (late delay, ~4500 ms, before cue)
+    t_delay_late = t_delay_end - 300.0  # ~4500 ms
+    idx_delay_late = np.argmin(np.abs(time - t_delay_late))
+    
+    # Cue period (average over cue)
+    idx_cue_start = np.argmin(np.abs(time - t_delay_end))
+    idx_cue_end = len(time) - 1
+    
+    # Create figure if needed
+    if ax_top is None or ax_bottom is None:
+        fig, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=figsize)
+    else:
+        fig = ax_top.figure
+    
+    # ========== Top Panel: Response bump during cue ==========
+    # Average activity during cue period
+    r_cue = np.mean(r[idx_cue_start:idx_cue_end+1], axis=0)
+    
+    # Normalize for visualization
+    r_cue_norm = r_cue / np.max(r_cue) if np.max(r_cue) > 0 else r_cue
+    
+    # Plot response bump
+    color = '#E74C3C' if stp_type == 'std' else '#3498DB'
+    ax_top.plot(theta, r_cue_norm, color=color, linewidth=2, label='Response')
+    
+    # Mark stimulus positions
+    ax_top.axvline(x=theta_s1, color='green', linestyle='--', alpha=0.7,
+                   label=f'θ_s1={theta_s1:.0f}°')
+    ax_top.axvline(x=theta_s2, color='orange', linestyle='--', alpha=0.7,
+                   label=f'θ_s2={theta_s2:.0f}°')
+    
+    # Find decoded position (peak)
+    decoded_idx = np.argmax(r_cue)
+    decoded_theta = theta[decoded_idx]
+    ax_top.axvline(x=decoded_theta, color='purple', linestyle=':', alpha=0.7,
+                   label=f'Decoded={decoded_theta:.1f}°')
+    
+    ax_top.set_xlabel('Preferred Orientation θ (°)')
+    ax_top.set_ylabel('Normalized Response')
+    ax_top.set_title(f'{title_prefix}. Neural Response (Cue Period)')
+    ax_top.legend(loc='upper right', fontsize=8)
+    ax_top.set_xlim(theta[0], theta[-1])
+    ax_top.set_ylim(0, 1.1)
+    
+    # ========== Bottom Panel: STP spatial distribution at delay end ==========
+    if stp_type == 'std':
+        # STD: plot x(θ) - shows depletion
+        stp_data = stp_x[idx_delay_late]
+        var_label = 'x (availability)'
+        ylabel = 'x(θ)'
+    else:
+        # STF: plot u(θ) - shows facilitation
+        stp_data = stp_u[idx_delay_late]
+        var_label = 'u (release prob.)'
+        ylabel = 'u(θ)'
+    
+    # Plot numerical simulation data (solid line)
+    ax_bottom.plot(theta, stp_data, color='gray', linewidth=2,
+                   label=f'Simulation ({var_label})')
+    
+    # Fit and plot analytical curve (dashed line)
+    U_baseline = 0.5 if stp_type == 'std' else 0.2
+    fit_result = fit_analytical_stp(
+        theta, stp_data, theta_s1, theta_s2,
+        stp_type=stp_type, U=U_baseline
+    )
+    
+    ax_bottom.plot(theta, fit_result['fitted_curve'], 'k--', linewidth=1.5,
+                   label=f'Analytical fit (R²={fit_result["r_squared"]:.3f})')
+    
+    # Mark stimulus positions
+    ax_bottom.axvline(x=theta_s1, color='green', linestyle='--', alpha=0.5)
+    ax_bottom.axvline(x=theta_s2, color='orange', linestyle='--', alpha=0.5)
+    
+    ax_bottom.set_xlabel('Preferred Orientation θ (°)')
+    ax_bottom.set_ylabel(ylabel)
+    ax_bottom.set_title(f'{title_prefix}. STP Distribution (Delay End, t≈{t_delay_late:.0f}ms)')
+    ax_bottom.legend(loc='best', fontsize=8)
+    ax_bottom.set_xlim(theta[0], theta[-1])
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight', dpi=300)
+    
+    return fig, (ax_top, ax_bottom)
 
 

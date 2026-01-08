@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 from src.visualization.plots import (
     setup_figure_style,
     plot_fig2_single_layer,
+    plot_fig2_panel_BE,  # New function for correct Fig.2B/E
 )
 
 
@@ -34,7 +35,7 @@ def main():
     parser = argparse.ArgumentParser(description='Regenerate Figure 2 with new layout')
     parser.add_argument('--output_dir', type=str, default='results/fig2',
                         help='Output directory for figures')
-    parser.add_argument('--output_name', type=str, default='fig2_new_layout.png',
+    parser.add_argument('--output_name', type=str, default='fig2_complete.png',
                         help='Output filename')
     args = parser.parse_args()
     
@@ -91,8 +92,47 @@ def main():
         print("    python scripts/run_fig2.py")
         return
     
+    # Reconstruct recording format for plot_fig2_panel_BE
+    # The recording dict needs: timeseries, theta, theta_s1, theta_s2
+    # Per paper: θ_s1=-30°, θ_s2=0° (delta = -30°)
+    theta_arr = data['std_theta']
+    s1_neuron = int(data['std_stim_neuron'])
+    s2_neuron = 90  # θ_s2=0° corresponds to neuron 90 in 180-neuron network
+    
+    # Convert neuron indices to theta values
+    theta_s1 = theta_arr[s1_neuron] if s1_neuron < len(theta_arr) else -30.0
+    theta_s2 = theta_arr[s2_neuron] if s2_neuron < len(theta_arr) else 0.0
+    
+    std_recording = {
+        'timeseries': {
+            'time': data['std_time'],
+            'r': data['std_activity'],
+            'stp_x': data['std_stp_x'],
+            'stp_u': data['std_stp_u'],
+        },
+        'theta': theta_arr,
+        's1_neuron': s1_neuron,
+        's2_neuron': s2_neuron,
+        'theta_s1': theta_s1,
+        'theta_s2': theta_s2,
+    }
+    
+    stf_recording = {
+        'timeseries': {
+            'time': data['stf_time'],
+            'r': data['stf_activity'],
+            'stp_x': data['stf_stp_x'],
+            'stp_u': data['stf_stp_u'],
+        },
+        'theta': data['stf_theta'],
+        's1_neuron': int(data['stf_stim_neuron']),
+        's2_neuron': s2_neuron,
+        'theta_s1': theta_s1,
+        'theta_s2': theta_s2,
+    }
+    
     # Generate figure with new layout
-    print("\n[2/2] Generating Figure with New Layout...")
+    print("\n[2/4] Generating Main Figure with New Layout...")
     
     output_path = output_dir / args.output_name
     fig = plot_fig2_single_layer(
@@ -101,20 +141,45 @@ def main():
         save_path=output_path
     )
     print(f"  ✅ Saved: {output_path}")
-    
     plt.close(fig)
+    
+    # Generate correct Fig.2B panel (STD: Response + STP spatial)
+    print("\n[3/4] Generating Fig.2B panel (STD: Response + x(θ) spatial)...")
+    fig_b, (ax_b_top, ax_b_bottom) = plot_fig2_panel_BE(
+        std_recording,
+        stp_type='std',
+        title_prefix='B',
+        figsize=(8, 6),
+        save_path=output_dir / 'fig2b_std_stp.png'
+    )
+    print(f"  ✅ Saved: {output_dir / 'fig2b_std_stp.png'}")
+    plt.close(fig_b)
+    
+    # Generate correct Fig.2E panel (STF: Response + STP spatial)
+    print("\n[4/4] Generating Fig.2E panel (STF: Response + u(θ) spatial)...")
+    fig_e, (ax_e_top, ax_e_bottom) = plot_fig2_panel_BE(
+        stf_recording,
+        stp_type='stf',
+        title_prefix='E',
+        figsize=(8, 6),
+        save_path=output_dir / 'fig2e_stf_stp.png'
+    )
+    print(f"  ✅ Saved: {output_dir / 'fig2e_stf_stp.png'}")
+    plt.close(fig_e)
     
     print("\n" + "=" * 60)
     print("Figure 2 regeneration complete!")
     print("=" * 60)
-    print(f"  Output: {output_path}")
-    print("\nNew layout:")
-    print("  [0,0] A: A1=Neural Activity + A2=STP x heatmap")
-    print("  [0,1] B: STP dynamics (single neuron)")
-    print("  [0,2] C: STD adjustment error curve")
-    print("  [1,0] D: D1=Neural Activity + D2=STP u heatmap")
-    print("  [1,1] E: STP dynamics (single neuron)")
-    print("  [1,2] F: STF adjustment error curve")
+    print(f"  Output directory: {output_dir}")
+    print("\nGenerated files:")
+    print(f"  - {args.output_name}: Main complete figure")
+    print(f"  - fig2b_std_stp.png: Fig.2B (Response + x(θ) spatial)")
+    print(f"  - fig2e_stf_stp.png: Fig.2E (Response + u(θ) spatial)")
+    print("\nFig.2B/E layout (per paper requirements):")
+    print("  Top: Neural response during cue period")
+    print("  Bottom: STP spatial distribution at delay end")
+    print("    - STD (Fig.2B): x(θ) showing depletion near θ_s1")
+    print("    - STF (Fig.2E): u(θ) showing facilitation near θ_s1")
 
 
 if __name__ == '__main__':

@@ -282,3 +282,153 @@ def t_test_bias(
         'significant': p_value < 0.05,
     }
 
+
+# =============================================================================
+# STP Analytical Fitting (for Fig.2B/E per Appendix C)
+# =============================================================================
+
+def analytical_stp_x(
+    theta: np.ndarray,
+    theta_s1: float,
+    theta_s2: float,
+    A1: float,
+    A2: float,
+    a: float,
+) -> np.ndarray:
+    """Analytical form for x(θ) from Appendix C Eq.(15).
+    
+    x(θ,t) = 1 - A1_x(t) * exp(-(θ-θ_s1)²/2a²) - A2_x(t) * exp(-(θ-θ_s2)²/2a²)
+    
+    Args:
+        theta: Orientation array (degrees)
+        theta_s1: First stimulus position (degrees)
+        theta_s2: Second stimulus position (degrees)
+        A1: Amplitude for S1 depletion
+        A2: Amplitude for S2 depletion
+        a: Spatial width (degrees)
+    
+    Returns:
+        x(θ) analytical prediction
+    """
+    # Handle circular distance
+    dx1 = theta - theta_s1
+    dx1 = np.where(dx1 > 90, dx1 - 180, dx1)
+    dx1 = np.where(dx1 < -90, dx1 + 180, dx1)
+    
+    dx2 = theta - theta_s2
+    dx2 = np.where(dx2 > 90, dx2 - 180, dx2)
+    dx2 = np.where(dx2 < -90, dx2 + 180, dx2)
+    
+    return 1.0 - A1 * np.exp(-dx1**2 / (2 * a**2)) - A2 * np.exp(-dx2**2 / (2 * a**2))
+
+
+def analytical_stp_u(
+    theta: np.ndarray,
+    theta_s1: float,
+    theta_s2: float,
+    A1: float,
+    A2: float,
+    a: float,
+    U: float = 0.2,
+) -> np.ndarray:
+    """Analytical form for u(θ) from Appendix C Eq.(17).
+    
+    u(θ,t) = U + A1_u(t) * exp(-(θ-θ_s1)²/2a²) + A2_u(t) * exp(-(θ-θ_s2)²/2a²)
+    
+    Args:
+        theta: Orientation array (degrees)
+        theta_s1: First stimulus position (degrees)
+        theta_s2: Second stimulus position (degrees)
+        A1: Amplitude for S1 facilitation
+        A2: Amplitude for S2 facilitation
+        a: Spatial width (degrees)
+        U: Baseline release probability
+    
+    Returns:
+        u(θ) analytical prediction
+    """
+    # Handle circular distance
+    dx1 = theta - theta_s1
+    dx1 = np.where(dx1 > 90, dx1 - 180, dx1)
+    dx1 = np.where(dx1 < -90, dx1 + 180, dx1)
+    
+    dx2 = theta - theta_s2
+    dx2 = np.where(dx2 > 90, dx2 - 180, dx2)
+    dx2 = np.where(dx2 < -90, dx2 + 180, dx2)
+    
+    return U + A1 * np.exp(-dx1**2 / (2 * a**2)) + A2 * np.exp(-dx2**2 / (2 * a**2))
+
+
+def fit_analytical_stp(
+    theta: np.ndarray,
+    stp_data: np.ndarray,
+    theta_s1: float,
+    theta_s2: float,
+    stp_type: str = 'std',
+    U: float = 0.5,
+) -> dict:
+    """Fit analytical STP model to numerical data.
+    
+    Fits the analytical STP spatial distribution from Appendix C:
+    - STD (Eq.15): x(θ) = 1 - A1*exp(-Δθ₁²/2a²) - A2*exp(-Δθ₂²/2a²)
+    - STF (Eq.17): u(θ) = U + A1*exp(-Δθ₁²/2a²) + A2*exp(-Δθ₂²/2a²)
+    
+    Args:
+        theta: Orientation array (degrees)
+        stp_data: STP variable data (x for STD, u for STF)
+        theta_s1: First stimulus position (degrees)
+        theta_s2: Second stimulus position (degrees)
+        stp_type: 'std' or 'stf'
+        U: Baseline release probability (for STF)
+    
+    Returns:
+        Dictionary with fitted parameters and curve:
+        - A1: Amplitude for S1
+        - A2: Amplitude for S2
+        - a: Spatial width (degrees)
+        - fitted_curve: Fitted STP distribution
+        - r_squared: Goodness of fit
+    """
+    if stp_type == 'std':
+        # Fit x(θ) = 1 - A1*exp(...) - A2*exp(...)
+        def model(theta_arr, A1, A2, a):
+            return analytical_stp_x(theta_arr, theta_s1, theta_s2, A1, A2, a)
+        
+        # Initial guess: A1 > A2 (S1 has more depletion due to longer time)
+        p0 = [0.3, 0.2, 20.0]
+        bounds = ([0, 0, 5], [1, 1, 60])
+    else:
+        # Fit u(θ) = U + A1*exp(...) + A2*exp(...)
+        def model(theta_arr, A1, A2, a):
+            return analytical_stp_u(theta_arr, theta_s1, theta_s2, A1, A2, a, U)
+        
+        # Initial guess
+        p0 = [0.3, 0.2, 20.0]
+        bounds = ([0, 0, 5], [1, 1, 60])
+    
+    try:
+        popt, _ = curve_fit(model, theta, stp_data, p0=p0, bounds=bounds, maxfev=5000)
+        fitted_curve = model(theta, *popt)
+        
+        # Compute R²
+        ss_res = np.sum((stp_data - fitted_curve) ** 2)
+        ss_tot = np.sum((stp_data - np.mean(stp_data)) ** 2)
+        r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+        
+        return {
+            'A1': popt[0],
+            'A2': popt[1],
+            'a': popt[2],
+            'fitted_curve': fitted_curve,
+            'r_squared': r_squared,
+        }
+    except Exception as e:
+        print(f"Warning: STP fitting failed: {e}")
+        return {
+            'A1': 0,
+            'A2': 0,
+            'a': 20,
+            'fitted_curve': stp_data,
+            'r_squared': 0,
+        }
+

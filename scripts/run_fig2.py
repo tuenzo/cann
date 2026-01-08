@@ -37,6 +37,7 @@ from src.visualization.plots import (
     plot_neural_activity,
     plot_stp_dynamics,
     plot_adjustment_error,
+    plot_fig2_panel_BE,  # New function for correct Fig.2B/E
 )
 from src.analysis.dog_fitting import fit_dog, compute_serial_bias
 
@@ -223,17 +224,30 @@ def main():
     print(f"  Saved: {output_dir / 'fig2a_std_activity.png'}")
     plt.close(fig_a)
     
-    # STD STP dynamics
-    fig_b, ax_b = plt.subplots(figsize=(8, 3))
+    # STD STP dynamics (OLD - single neuron time series)
+    fig_b_old, ax_b_old = plt.subplots(figsize=(8, 3))
     plot_stp_dynamics(
-        std_recording['timeseries']['time'], 
-        std_recording['timeseries']['stp_x'], 
+        std_recording['timeseries']['time'],
+        std_recording['timeseries']['stp_x'],
         std_recording['timeseries']['stp_u'],
-        std_recording['s1_neuron'], ax=ax_b, title='Fig 2B: STD Dynamics',
+        std_recording['s1_neuron'], ax=ax_b_old, title='Fig 2B (old): STD Dynamics',
         interpolate=True, target_length=2000
     )
-    fig_b.savefig(output_dir / 'fig2b_std_stp.png', bbox_inches='tight')
-    print(f"  Saved: {output_dir / 'fig2b_std_stp.png'}")
+    fig_b_old.savefig(output_dir / 'fig2b_std_stp_old.png', bbox_inches='tight')
+    print(f"  Saved: {output_dir / 'fig2b_std_stp_old.png'}")
+    plt.close(fig_b_old)
+    
+    # Fig 2B: NEW - Response bump + STP spatial distribution (per paper requirements)
+    # Top: Neural response during cue period
+    # Bottom: x(θ) at delay end showing depletion near θ_s1
+    fig_b, (ax_b_top, ax_b_bottom) = plot_fig2_panel_BE(
+        std_recording,
+        stp_type='std',
+        title_prefix='B',
+        figsize=(8, 6),
+        save_path=output_dir / 'fig2b_std_stp.png'
+    )
+    print(f"  Saved: {output_dir / 'fig2b_std_stp.png'} (NEW: Response + STP spatial)")
     plt.close(fig_b)
     
     # STD adjustment error
@@ -258,16 +272,30 @@ def main():
     print(f"  Saved: {output_dir / 'fig2d_stf_activity.png'}")
     plt.close(fig_d)
     
-    fig_e, ax_e = plt.subplots(figsize=(8, 3))
+    # STF STP dynamics (OLD - single neuron time series)
+    fig_e_old, ax_e_old = plt.subplots(figsize=(8, 3))
     plot_stp_dynamics(
-        stf_recording['timeseries']['time'], 
-        stf_recording['timeseries']['stp_x'], 
+        stf_recording['timeseries']['time'],
+        stf_recording['timeseries']['stp_x'],
         stf_recording['timeseries']['stp_u'],
-        stf_recording['s1_neuron'], ax=ax_e, title='Fig 2E: STF Dynamics',
+        stf_recording['s1_neuron'], ax=ax_e_old, title='Fig 2E (old): STF Dynamics',
         interpolate=True, target_length=2000
     )
-    fig_e.savefig(output_dir / 'fig2e_stf_stp.png', bbox_inches='tight')
-    print(f"  Saved: {output_dir / 'fig2e_stf_stp.png'}")
+    fig_e_old.savefig(output_dir / 'fig2e_stf_stp_old.png', bbox_inches='tight')
+    print(f"  Saved: {output_dir / 'fig2e_stf_stp_old.png'}")
+    plt.close(fig_e_old)
+    
+    # Fig 2E: NEW - Response bump + STP spatial distribution (per paper requirements)
+    # Top: Neural response during cue period
+    # Bottom: u(θ) at delay end showing facilitation near θ_s1
+    fig_e, (ax_e_top, ax_e_bottom) = plot_fig2_panel_BE(
+        stf_recording,
+        stp_type='stf',
+        title_prefix='E',
+        figsize=(8, 6),
+        save_path=output_dir / 'fig2e_stf_stp.png'
+    )
+    print(f"  Saved: {output_dir / 'fig2e_stf_stp.png'} (NEW: Response + STP spatial)")
     plt.close(fig_e)
     
     fig_f, ax_f = plt.subplots(figsize=(6, 4))

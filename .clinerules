@@ -49,9 +49,21 @@ configs/
 - [x] 两层CANN实验
 - [x] 可视化模块
 - [x] 代码合并优化（2026-01-07）
+- [x] Fig.2B/E 正确实现（2026-01-08）
 
 ## 最近的工作
 <!-- 每次任务结束时更新这里 -->
+- 日期: 2026-01-08
+- 内容: Fig.2B/E 按论文要求修改
+  - 新增 `plot_fig2_panel_BE()` 函数（`src/visualization/plots.py`）
+    - 上半部分：cue 触发后的 response bump（神经响应空间分布）
+    - 下半部分：delay 末期的 STP 空间分布（STD 画 x(θ)，STF 画 u(θ)）
+    - 灰色虚线：Appendix C Eq.(15)/(17) 解析拟合
+  - 新增 `fit_analytical_stp()` 函数到 `src/analysis/dog_fitting.py`
+    - STP 解析模型拟合（Appendix C）
+  - 更新 `scripts/run_fig2.py` 使用新的绘图函数
+  - 时间结构：S1(200ms) → ISI(1000ms) → S2(200ms) → Delay(3400ms) → Cue(500ms)
+
 - 日期: 2026-01-07
 - 内容: 代码合并优化
   - 将 `run_trial_with_recording` 和 `run_fast_experiment_with_recording` 合并到 `fast_single_layer_optimized.py`
